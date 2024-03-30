@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Project prefix, for wandb and filename logging
+# follow the format of "discordhandle"-"shortprojectname"
+export PROJECT_PREFIX="r01_sandbox"
+
+# RWKV_NO_CUDA=0 (poor naming) to use CUDA in infctx
+# or RWKV_TORCH_COMPILE=1 to speed up the non-cuda to near CUDA speed
+export RWKV_NO_CUDA=0
+
+# Model version you are using, use v5 or v4 respectively
+export MODEL_VERSION="v5"
+
+# Deepspeed strategy to use, you can leave this unchanged
+export DEEPSPEED_STRAT="deepspeed_stage_1"
+export GPU_DEVICES="auto"
+export ENABLE_WANDB=False
+
+# Prefixes we will be using
+export WANDB_PREFIX="${PROJECT_PREFIX}"
+
+if [ "$ENABLE_WANDB" = "True" ]; then
+    export WANDB_MODE="online"
+else
+    export WANDB_MODE="disabled"
+fi
+
+# Computing the notebook, and various paths
+export ROOT_DIR="${HOME}/_/neurallambda-RWKV-infctx-trainer"
+export PROJECT_DIR="${ROOT_DIR}/run/r01"
+
+echo "DEEPSPEED_STRAT: ${DEEPSPEED_STRAT}"
+echo "ENABLE_WANDB: ${ENABLE_WANDB}"
+echo "GPU_DEVICES: ${GPU_DEVICES}"
+echo "PROJECT_DIR: ${PROJECT_DIR}"
+
+# Configure the initial model name you are using
+export INIT_MODEL_NAME="init.pth"
+
+# Setup the required project directories
+mkdir -p "${PROJECT_DIR}/model/"
+mkdir -p "${PROJECT_DIR}/datapath/"
+mkdir -p "${PROJECT_DIR}/checkpoint/"
+
+
+echo "##################################################"
+echo "INITIALIZING"
+python "${ROOT_DIR}/RWKV-v5/init_model.py" \
+    --n_layer 4 --n_embd 256 \
+    --vocab_size world --skip-if-exists \
+    "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+
+
+echo "##################################################"
+echo "PRELOADING DATAET"
+python "${ROOT_DIR}/RWKV-v5/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
+
+
+echo "##################################################"
+echo "TRAINING"
+python "${ROOT_DIR}/RWKV-v5/lightning_trainer.py" fit \
+    -c "${PROJECT_DIR}/config.yaml" \
+    --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
+    --trainer.strategy="${DEEPSPEED_STRAT}" \
+    --trainer.devices="${GPU_DEVICES}" \
+    --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
+    --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+
+
+echo "##################################################"
+echo "EXPORTING"
+python "${ROOT_DIR}/RWKV-v5/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
+ls -alh "${PROJECT_DIR}/checkpoint/final.pth"
+
+
+echo "##################################################"
+echo "TESTING"
+export ROOT_DIR="${HOME}/_/neurallambda-RWKV-infctx-trainer"
+python "${ROOT_DIR}/RWKV-v5/dragon_test.py" "${PROJECT_DIR}/checkpoint/final.pth" "cuda fp32"
