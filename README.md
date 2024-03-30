@@ -1,3 +1,32 @@
+# Neurallambda + RWKV-Infctx-Trainer
+
+Goal: Experiment with adding Neurallambda stuff to RWKV
+
+- TODO:
+  - [ ] Experiment with adding stack into RWKV
+    - Compare: random init model, vanilla rwkv, vanilla rwkv + training, rwkv w stack + training
+  - [ ] Add Queue
+  - [ ] Add Neurallambda
+
+## Notes
+
+I find that RWKV efforts have been splatted across so many repos (and maintainers) that I find it hard to keep track of things. Here are notes I've kept to orient myself during this attempt to adapt RWKV training to `neurallambda`.
+
+- 2 Trainer repos
+  - infctx-trainer
+  - RWKV-LM
+
+- infctx-trainer
+  - docs largely live in [`notebooks`](https://github.com/RWKV/RWKV-infctx-trainer/tree/40c1fb353d37de75c2f912da81e1679caca0cdfa/notebook)
+  - data config.yml [documentation](https://github.com/RWKV/RWKV-infctx-trainer/blob/40c1fb353d37de75c2f912da81e1679caca0cdfa/notebook/dataset-config/dataset-config-huggingface-examples.ipynb#L11)
+  - there's also `guides/`
+
+
+
+---------------------
+
+(original README)
+
 # RWKV Infinite Context trainer
 
 > If you are new to RWKV, it would be better to find out more about us via our wiki first here: https://wiki.rwkv.com/
@@ -17,7 +46,7 @@ To use this repo, go into `RWKV-v4neo` directory and do
 python3 lightning_trainer.py fit -c {your_config}.yaml
 ```
 
-Remember to modify the configuration for your own need. 
+Remember to modify the configuration for your own need.
 
 See [RWKV-v4neo/config-example.yaml](./RWKV-v4neo/config-example.yaml) for documentation on the various options
 
@@ -52,12 +81,12 @@ python -m pip install lightning==2.1.3 deepspeed==0.12.6
 # conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch-nightly -c nvidia
 # python -m pip install lightning==2.0.5 deepspeed==0.10.0
 
-# Verify your pytorch version 
+# Verify your pytorch version
 python -c "import torch; print(torch.__version__)"
 
 # Install all the other various dependencies
 # PS: We use python -m pip, instead of pip directly, as it resolve issues with venv not loading the right pip
-python -m pip install datasets transformers 
+python -m pip install datasets transformers
 python -m pip install ninja numexpr jsonargparse 'jsonargparse[signatures]'
 python -m pip install lm-dataformat ftfy sentencepiece tokenizers wandb
 
@@ -102,7 +131,7 @@ python3 export_checkpoint.py ../path/to/checkpoint/last.ckpt/ ../path/to/export/
 python3 dragon_test.py ../path/to/export/model.pth
 
 # @TODO, convert the model to bf16 format (instead of the huge fp32 format now)
-#        for now you will have to use the RWKV pip package to do this with python code: 
+#        for now you will have to use the RWKV pip package to do this with python code:
 #        https://pypi.org/project/rwkv/
 ```
 
@@ -123,16 +152,16 @@ You can find the training channel on our discord here: https://discord.com/chann
 - Ensure your host is not running cuda 12.0 (use either 11.8, or >=12.1), as this is known to have freeze issues
 - When resuming from checkpoint, the estimated time is inaccurate. See: https://github.com/Lightning-AI/lightning/issues/18220
 - Note that some terms are confusing, so this is a quick glossary
-   - a `step` in the progress bar below, means 1 data sample PER GPU. 
+   - a `step` in the progress bar below, means 1 data sample PER GPU.
    - a classic transformer batch is a `trainer/global_step` in wandb
-   - a `substep` in wandb means a single data sample. 
+   - a `substep` in wandb means a single data sample.
    -`(accumulate_gradiant_batch * gpu count) substeps = 1 trainer/global_step`
 
 ## Should I use the official RWKV-LM trainer or the infctx trainer?
 
 Generally if your training a foundation model from scratch - with a fixed context size, and you need the absolute highest throughput across multiple nodes (ie. 10 nodes filled with A100 servers), the [official trainer](https://github.com/BlinkDL/RWKV-LM) would perform much better (ie 2x faster depending on the settings)
 
-If you need deepspeed 3 support, or you deal with dynamic datasets, this trainer is much more flexible, for nearly all other use cases. 
+If you need deepspeed 3 support, or you deal with dynamic datasets, this trainer is much more flexible, for nearly all other use cases.
 
 Overtime as we optimize the infctx trainer, the gap to the official trainer should shrink, however this is not the highest priority (infctx working > absolute speed)
 

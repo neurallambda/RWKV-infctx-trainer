@@ -17,16 +17,16 @@ global wkv5_cuda_kernel
 wkv5_cuda_kernel = None
 
 # WKV5_CUDA autograd module
-class WKV5_CUDA(torch.autograd.Function):  
+class WKV5_CUDA(torch.autograd.Function):
 
     # WKV5 forwarding process
     # NOTE: This will modify the state value as part of the forward process
     @staticmethod
-    def forward(ctx, 
-            B:int, T:int, C:int, H:int, 
-            state:torch.Tensor, 
-            r:torch.Tensor, k:torch.Tensor, 
-            v:torch.Tensor, w:torch.Tensor, 
+    def forward(ctx,
+            B:int, T:int, C:int, H:int,
+            state:torch.Tensor,
+            r:torch.Tensor, k:torch.Tensor,
+            v:torch.Tensor, w:torch.Tensor,
             u:torch.Tensor
         ):
         with torch.no_grad():
@@ -61,7 +61,7 @@ class WKV5_CUDA(torch.autograd.Function):
 
             # Output logits
             y = torch.empty(B, T, C, device=r.device, dtype=dtype, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
-            
+
             # # Debugging y value is populated by cuda kernel
             # y = torch.zeros(B, T, C, device=r.device, dtype=dtype).contiguous() # .uniform_(-1, 1)
             # assert torch.sum(y) == 0, "Initial zero check"
@@ -84,14 +84,14 @@ class WKV5_CUDA(torch.autograd.Function):
                 wkv5_cuda_kernel.forward_fp32(B, T, C, H, state, r, k, v, eew, u, y)
             else:
                 raise ValueError(f"Unsupported dtype {dtype} for WKV5_CUDA")
-            
+
             # # Assert output logits y is not zero, nor NaN
             # assert torch.sum(y) != 0, "Post kernel, non zero check"
             # assert not torch.isnan(y).any(), "Post kernel, NaN check"
 
             # Logits (without state)
             return y
-    
+
     # WKV5 backward pass process
     @staticmethod
     def backward(ctx, gy):
@@ -115,7 +115,7 @@ class WKV5_CUDA(torch.autograd.Function):
             gv = torch.empty((B, T, C), device=gy.device, requires_grad=False, dtype=dtype, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
             gw = torch.empty((B, C), device=gy.device, requires_grad=False, dtype=dtype, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
             gu = torch.empty((B, C), device=gy.device, requires_grad=False, dtype=dtype, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
-            
+
             # Perform the backward pass
             if dtype == torch.bfloat16:
                 wkv5_cuda_kernel.backward_bf16(B, T, C, H, inState, r, k, v, eew, ew, u, gy, gr, gk, gv, gw, gu)
@@ -125,7 +125,7 @@ class WKV5_CUDA(torch.autograd.Function):
                 wkv5_cuda_kernel.backward_fp32(B, T, C, H, inState, r, k, v, eew, ew, u, gy, gr, gk, gv, gw, gu)
             else:
                 raise ValueError(f"Unsupported dtype {dtype} for WKV5_CUDA")
-            
+
             gw = torch.sum(gw, 0).view(H, C//H)
             gu = torch.sum(gu, 0).view(H, C//H)
 
@@ -141,14 +141,14 @@ class WKV5_CUDA(torch.autograd.Function):
                 # Gr, Gk, Gv, Gw, Gu
                 gr, gk, gv, gw, gu
             )
-       
-@TCompileDisable 
+
+@TCompileDisable
 @torch.jit.ignore
 def RUN_WKV5_CUDA(
-    B:int, T:int, C:int, H:int, 
-    state:torch.Tensor, 
-    r:torch.Tensor, k:torch.Tensor, 
-    v:torch.Tensor, w:torch.Tensor, 
+    B:int, T:int, C:int, H:int,
+    state:torch.Tensor,
+    r:torch.Tensor, k:torch.Tensor,
+    v:torch.Tensor, w:torch.Tensor,
     u:torch.Tensor
 ):
     return WKV5_CUDA.apply(B, T, C, H, state, r, k, v, w, u)
@@ -162,7 +162,7 @@ class RWKV_TimeMix(JITModClass):
 
     def __init__(self, layer_id, n_layer, n_embd, n_head, head_size, dim_att, chunk_len:int = 128, precision:int = 64):
         super().__init__()
-        
+
         self.dim_att = dim_att
         self.n_layer = n_layer
         self.n_embd = n_embd
@@ -173,7 +173,7 @@ class RWKV_TimeMix(JITModClass):
         self.head_size_divisor = 8
 
         # V5-R4 changes
-        # https://github.com/BlinkDL/RWKV-LM/commit/5aab658f945ba80745d36c2ab411fb43df3a74f9    
+        # https://github.com/BlinkDL/RWKV-LM/commit/5aab658f945ba80745d36c2ab411fb43df3a74f9
         with torch.no_grad():
             ratio_0_to_1 = layer_id / (n_layer - 1)  # 0 to 1
             ratio_1_to_almost0 = 1.0 - (layer_id / n_layer)  # 1 to ~0
@@ -224,7 +224,7 @@ class RWKV_TimeMix(JITModClass):
         if RWKV_NO_CUDA is True:
             self.use_cuda = False
             return
-        
+
         # Load cuda if needed
         if wkv5_cuda_kernel is None:
             # Head sizing
@@ -243,10 +243,10 @@ class RWKV_TimeMix(JITModClass):
                 ],
                 verbose=True,
                 extra_cuda_cflags=[
-                    "-res-usage", 
-                    "--use_fast_math", 
-                    "-O3", "-Xptxas -O3", 
-                    "--extra-device-vectorization", 
+                    "-res-usage",
+                    "--use_fast_math",
+                    "-O3", "-Xptxas -O3",
+                    "--extra-device-vectorization",
                     f"-D_N_={HEAD_SIZE}"
                 ]
             )
@@ -254,7 +254,7 @@ class RWKV_TimeMix(JITModClass):
             # Close log the compillation block
             print(f"[RWKV.TimeMix] CUDA kernel compiled & loaded globally")
             print("---")
-        
+
         # Initialize the cuda kernel
         self.use_cuda = True
 
@@ -267,7 +267,7 @@ class RWKV_TimeMix(JITModClass):
     #       [batch_size, n_head, head_size, head_size] ## WKV state
     #   ]
     #
-    # Returns a pair 
+    # Returns a pair
     # - of output embedding of shape [batch_size, seq_len, embedding_size]
     # - and the last output state of shape [
     #       [batch_size, state_size] ## Channel mix state,
@@ -277,7 +277,7 @@ class RWKV_TimeMix(JITModClass):
         # Run with cuda
         if self.use_cuda is True:
            return self._forward_cuda(x, last_state)
-        
+
         # Run without cuda (cpu mode, etc)
         return self._forward_nocuda_optimized(x, last_state)
 
@@ -289,7 +289,7 @@ class RWKV_TimeMix(JITModClass):
 
         # Perform the tokenshift, and get the respective state
         xx = torch.concat((last_state[0].unsqueeze(1), x[:, :-1]), dim=1)
-    
+
         # Get the xk, xv, xr, xg, and rkvg
         xk = modified_lerp(x, self.time_mix_k, xx)
         xv = modified_lerp(x, self.time_mix_v, xx)
@@ -306,10 +306,10 @@ class RWKV_TimeMix(JITModClass):
 
         # Perform the cuda forward pass
         x_logits = RUN_WKV5_CUDA(
-            B, T, C, H, 
-            state, 
-            r, k, v, 
-            self.time_decay.float(), 
+            B, T, C, H,
+            state,
+            r, k, v,
+            self.time_decay.float(),
             self.time_faaaa.to(r.dtype)
         )
 
@@ -324,8 +324,7 @@ class RWKV_TimeMix(JITModClass):
     @JITModMethod
     def _forward_nocuda_optimized(self, x, last_state: tuple[torch.Tensor,torch.Tensor]) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor]]:
         shift_state_out = x[:,-1]
-
-        assert x.size(-2) % self.chunk_len == 0, "fast non-cuda rwkv5.2+ requires ctxlen to be an exact multiple of chunk_len"
+        assert x.size(-2) % self.chunk_len == 0, f"fast non-cuda rwkv5.2+ requires ctxlen to be an exact multiple of chunk_len. x.size(-2)={x.size(-2)}, self.chunk_len={self.chunk_len}"
 
         # Get the x sizing
         B, T, C = x.size()
@@ -354,7 +353,7 @@ class RWKV_TimeMix(JITModClass):
         # Logits and state
         wkv_state = last_state[1].to(r.dtype)
 
-        x_logits, wkv_state = rwkv_inner(r, k, v, w, u, wkv_state, self.chunk_len, self.precision) 
+        x_logits, wkv_state = rwkv_inner(r, k, v, w, u, wkv_state, self.chunk_len, self.precision)
         x_logits = x_logits.transpose(1,2).reshape(B,T,C)
 
         # Reshape and normalize the logits
@@ -364,13 +363,13 @@ class RWKV_TimeMix(JITModClass):
 
         # Return the logits and the state
         return (x_logits, (shift_state_out,wkv_state))
-    
+
 
 def compute_wkv_state(
         k, v, r,
         time_faaaa: torch.nn.Parameter,
         time_decay: torch.nn.Parameter,
-        wkv_state, 
+        wkv_state,
         n_head:int, head_size:int,
         B:int, TT:int
     ):
@@ -384,7 +383,7 @@ def compute_wkv_state(
     out = (u * r) @ at
     for t in range(TT):
         out[:,t] += r[:,t] @ wkv_state
-        
+
         # We make a clone copy, so the previous object backprop state is tracked seperately
         wkv_state = wkv_state.clone()
         wkv_state *= w
