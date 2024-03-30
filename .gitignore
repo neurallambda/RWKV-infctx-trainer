@@ -7,7 +7,7 @@
 wandb/
 data/
 vocab.json
-*.sh
+# *.sh
 *log/
 test/
 tools/
@@ -147,7 +147,7 @@ dmypy.json
 !src/**/*.py
 
 # Additional folders used for the experiment
-# and standard hidden files ignore. Including 
+# and standard hidden files ignore. Including
 # example files generated via notebook tutorials
 .*
 scratch/
