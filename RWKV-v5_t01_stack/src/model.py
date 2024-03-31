@@ -90,7 +90,7 @@ class Block(nn.Module):
 
         # Setup droupout at block level
         self.dropout = dropout
-        if dropout > 0:            
+        if dropout > 0:
             self.drop0 = nn.Dropout(p = dropout)
             self.drop1 = nn.Dropout(p = dropout)
 
@@ -120,7 +120,7 @@ class Block(nn.Module):
                 last_state.channel_mix_state,
             )
             x = x + ffn_out
-        
+
         return x, BlockState(att_state, ffn_state)
 
 
@@ -130,7 +130,7 @@ class L2Wrap(torch.autograd.Function):
     def forward(ctx, loss, y, factor, currentMask):
         # Currently (8th July 2023), save_for_backward, causes an issue with
         # pytorch.compile (see: https://github.com/pytorch/pytorch/blob/e600505e3209eaf539e8bc99870ea55236cefbf5/torch/_dynamo/variables/higher_order_ops.py#L735)
-        # 
+        #
         # Due to L2Wrap being a major hotspot, we should monitor this for future support.
         # so that once its resolved, we can include the L2Wrap step in the torch.compile path
         #
@@ -199,7 +199,7 @@ class RWKV(L.LightningModule):
                  # loss bias start
                  position_loss_bias: float = 1.0,
                  position_loss_bias_in_validation: bool = False,
-                 
+
                  # Selective loss settings
                  token_loss_threshold: float = 0.0,
                  token_dropout_rate: float = 0.0, # Dropout rate should be between 0-1
@@ -258,7 +258,7 @@ class RWKV(L.LightningModule):
 
         if n_embd < 0:
             n_embd = model_weights['head.weight'].shape[1]
-        
+
         if vocab_size < 0:
             vocab_size = model_weights['head.weight'].shape[0]
 
@@ -322,7 +322,7 @@ class RWKV(L.LightningModule):
         assert n_embd  % 32 == 0, f"n_embd must be divisible by 32"
         assert dim_att % 32 == 0, f"dim_att must be divisible by 32"
         assert dim_ffn % 32 == 0, f"dim_ffn must be divisible by 32"
-        
+
         # Matmu precision check
         if torch_set_float32_matmul_precision is not None:
             torch.set_float32_matmul_precision(torch_set_float32_matmul_precision)
@@ -371,7 +371,7 @@ class RWKV(L.LightningModule):
             if self.trainer.num_devices > 1:
                 if self.bptt_learning_range <= 0:
                     print("[WARNING]: unlimited bptt_learning_range across multiple GPU's has a performance penalty with datasets of mixed sizes due to its constant need to keep all GPU's in sync (consider using bptt_learning_range=1 instead)")
-        
+
         # Get the learning rate used for the optimizer
         lr_init = self.lr_init
         lr_final = self.lr_final
@@ -477,7 +477,7 @@ class RWKV(L.LightningModule):
                                   adam_w_mode=False,
                                   weight_decay=self.weight_decay,
                                   amsgrad=False)
-            
+
         # Throw if wramup_steps and lr_period are both set (not supported)
         if self.warmup_steps > 0 and self.lr_period > 0:
             raise ValueError(
@@ -539,7 +539,7 @@ class RWKV(L.LightningModule):
                     end_factor= lr_final / lr_init,
                     total_iters=lr_total_step
                 )
-            else:  
+            else:
                 raise ValueError(f"lr_type {self.lr_type} not supported.")
 
             return {
@@ -550,8 +550,8 @@ class RWKV(L.LightningModule):
                     "frequency": 1,
                 },
             }
-                
-    
+
+
     # We have to compute the number of steps per epoch ourselves
     # as this value is not provided directly by pytorch lightning
     # https://github.com/Lightning-AI/lightning/issues/5449#issuecomment-1501597319
@@ -561,7 +561,7 @@ class RWKV(L.LightningModule):
         #
         # This MUST be called before len(self.trainer.train_loader)
         # otherwise there is a bug in which the train_dataloader is not
-        # fully initialized, which seems to be resolved by computing the 
+        # fully initialized, which seems to be resolved by computing the
         # self.trainer.estimated_stepping_batches
         estimated_stepping_batches = self.trainer.estimated_stepping_batches
 
@@ -576,13 +576,13 @@ class RWKV(L.LightningModule):
         # from the dataloader iteration process - to ensure we properly offset the data
         # on a checkpoint resumption
         #
-        # Basically workaround hack for: 
-        # https://discuss.pytorch.org/t/resume-iterating-dataloader-from-checkpoint-batch-idx/60683/14 
+        # Basically workaround hack for:
+        # https://discuss.pytorch.org/t/resume-iterating-dataloader-from-checkpoint-batch-idx/60683/14
         #
         # See: data.py -> CheckPointResumeSafeDataLoader
         train_dataloader._set_model_self(self)
-        
-        # Get the number of epochs, 
+
+        # Get the number of epochs,
         # use estimated_stepping_batches if max_epochs is set
         max_epochs = self.trainer.max_epochs
         if max_epochs > 0:
@@ -597,7 +597,7 @@ class RWKV(L.LightningModule):
 
         # Total number of steps
         return num_steps
-    
+
     @property
     def deepspeed_offload(self) -> bool:
         strategy = self.trainer.strategy
@@ -605,7 +605,7 @@ class RWKV(L.LightningModule):
             cfg = strategy.config["zero_optimization"]
             return "offload_optimizer" in cfg or "offload_parameters" in cfg
         return False
-    
+
     @property
     def deepspeed_stage(self) -> int:
         strategy = self.trainer.strategy
@@ -626,14 +626,14 @@ class RWKV(L.LightningModule):
         if self.dropout > 0.0:
             x = self.drop0(x)
 
-        new_states = BlockStateList.empty(self.n_layer, B, self.n_embd, 
+        new_states = BlockStateList.empty(self.n_layer, B, self.n_embd,
                                           self.n_head, self.head_size,
                                           x.device, x.dtype)
-        
+
         # last_shift_states can be None, when we are performing direct inference
         if last_shift_states is None:
             cur_bs_list = BlockStateList.create(
-                self.n_layer, B, self.n_embd, 
+                self.n_layer, B, self.n_embd,
                 self.n_head, self.head_size,
                 x.device, x.dtype
             )
@@ -670,14 +670,14 @@ class RWKV(L.LightningModule):
 
         # # Configuring the chunk sizes
         # first_round_chunk_size = 256
-        
+
         # # Next round chunk sizes forumlation
         # def nextRoundChunkSize(t):
         #     return first_round_chunk_size
 
         # # First round, first block
         # def firstRound_firstBlock_subProcess(
-        #         block:Block, last_state:BlockState, 
+        #         block:Block, last_state:BlockState,
         #         in_x:torch.tensor, grad_cp):
         #     if grad_cp:
         #         out_x, new_state = deepspeed_checkpoint(
@@ -685,26 +685,26 @@ class RWKV(L.LightningModule):
         #     else:
         #         out_x, new_state = block(in_x, last_state)
         #     return out_x, new_state
-            
+
         # # First round, next block
         # def firstRound_nextBlock_subProcess(
-        #         block:Block, last_state:BlockState, 
-        #         in_x_promise: torch.jit.Future[torch.Tensor], 
+        #         block:Block, last_state:BlockState,
+        #         in_x_promise: torch.jit.Future[torch.Tensor],
         #         grad_cp):
         #     in_x, prv_layer_state = torch.jit.wait(in_x_promise)
         #     return firstRound_firstBlock_subProcess(block, last_state, in_x, grad_cp)
-        
+
         # # Next round, sub process
         # def nextRound_firstBlock_subProcess(
         #     block:Block, last_state_promise: torch.jit.Future[BlockState],
         #     in_x:torch.Tensor, grad_cp):
         #     last_x, last_state = torch.jit.wait(last_state_promise)
         #     return firstRound_firstBlock_subProcess(block, last_state, in_x, grad_cp)
-    
+
         # # Next round, next block
         # def nextRound_nextBlock_subProcess(
         #     block:Block, last_state_promise: torch.jit.Future[BlockState],
-        #     in_x_promise: torch.jit.Future[torch.Tensor], 
+        #     in_x_promise: torch.jit.Future[torch.Tensor],
         #     grad_cp):
         #     last_x, last_state = torch.jit.wait(last_state_promise)
         #     in_x, prv_layer_state = torch.jit.wait(in_x_promise)
@@ -712,18 +712,18 @@ class RWKV(L.LightningModule):
 
         # # Final x value futures
         # output_x_futures = []
-        
+
         # # Highly experimental first round token pass with JIT fork
         # first_round_futures = []
         # for i in range(len(self.blocks)):
         #     if i == 0:
         #         future = torch.jit.fork(
-        #             firstRound_firstBlock_subProcess, self.blocks[i], 
+        #             firstRound_firstBlock_subProcess, self.blocks[i],
         #             cur_bs_list[i], x[:,:first_round_chunk_size], self.grad_cp
         #         )
         #     else:
         #         future = torch.jit.fork(
-        #             firstRound_nextBlock_subProcess, self.blocks[i], 
+        #             firstRound_nextBlock_subProcess, self.blocks[i],
         #             cur_bs_list[i], first_round_futures[i-1], self.grad_cp
         #         )
         #     first_round_futures.append(future)
@@ -739,12 +739,12 @@ class RWKV(L.LightningModule):
         #     for i in range(len(self.blocks)):
         #         if i == 0:
         #             future = torch.jit.fork(
-        #                 nextRound_firstBlock_subProcess, self.blocks[i], 
+        #                 nextRound_firstBlock_subProcess, self.blocks[i],
         #                 next_round_futures[i], x[:,idx:idx+increment], self.grad_cp
         #             )
         #         else:
         #             future = torch.jit.fork(
-        #                 nextRound_nextBlock_subProcess, self.blocks[i], 
+        #                 nextRound_nextBlock_subProcess, self.blocks[i],
         #                 next_round_futures[i], next_round_futures[i-1], self.grad_cp
         #             )
         #         next_round_futures[i] = future
@@ -755,7 +755,7 @@ class RWKV(L.LightningModule):
         # for i in range(len(self.blocks)):
         #     tmp_x, new_state = torch.jit.wait(next_round_futures[i])
         #     new_states[i] = new_state
-        
+
         # # Lets process the final output_x_futures
         # output_x, tmp_state = torch.jit.wait(output_x_futures[0])
         # for i in range(1, len(output_x_futures)):
@@ -776,7 +776,7 @@ class RWKV(L.LightningModule):
     # https://github.com/Lightning-AI/lightning/blob/37c244f94be365496def82870b22c2faf0ab889e/src/lightning/pytorch/core/module.py#L999
     #
     # ---
-    # 
+    #
     # This allow us to avoid disabling the "automatic_optimization" flag
     #
     # Which would have been required to do "segmented learning", or "Backpropagation Through Time"
@@ -794,8 +794,8 @@ class RWKV(L.LightningModule):
     # - (And probably other features that I am not aware of)
     #
     # So this is a hacky work around, to avoid reimplementing all of the above.
-    # 
-    # From the current code implementatiion, it seem like this is blocked only by 
+    #
+    # From the current code implementatiion, it seem like this is blocked only by
     # automatic_optimization flag - and has no adverse side effect otherwise
     # https://lightning.ai/docs/pytorch/stable/_modules/lightning/pytorch/core/module.html#LightningModule.manual_backward
     #
@@ -820,7 +820,7 @@ class RWKV(L.LightningModule):
             self._counting_tokens = 0
         if self._counting_time_start is None or self._counting_time_start == 0:
             self._counting_time_start = time.time()
-        
+
         # Get the input sequence, and attention mask
         seq = batch['input_ids']
         assert isinstance(seq, torch.Tensor) and seq.ndim == 2
@@ -851,7 +851,7 @@ class RWKV(L.LightningModule):
         # ### ---
         # ### Positional loss bias handling
         # ### ---
-        
+
         # # Get the starting and ending loss bias
         # loss_bias_start = self.position_loss_bias
         # loss_bias_end   = 2.0 - loss_bias_start
@@ -881,16 +881,16 @@ class RWKV(L.LightningModule):
         seq_mask = ori_seq_mask
 
         ### ---
-        ### Training cutoff logic handling 
+        ### Training cutoff logic handling
         ### ---
-        
+
         # Perform cutoff for training run
         if is_training_run:
             prev_step = 0
 
             # Avoid using the zip operation, as torch.compile throws an exception on it
             # with `zip not reconized as a valid function`
-            # 
+            #
             # This skip if ctx_len_warmup_steps/ctx_len_cutoffs is not set
             # ---
             # for step, len_cut in zip(self.ctx_len_warmup_steps,
@@ -914,11 +914,11 @@ class RWKV(L.LightningModule):
                     seq_mask[:, :pos] = 0
                     break
                 prev_step = step
-        
+
         ### ---
         ### Various size checking, and implementing the core checkpoint_step
         ### ---
-        
+
         # BPTT, and training steps, and various size fetching
         do_bptt_learning = self.bptt_learning and is_training_run
         idx, targets = seq[:, :-1], seq[:, 1:]
@@ -933,7 +933,7 @@ class RWKV(L.LightningModule):
         # # DO NOT DO THIS : This causes multi node / multi GPU to go out of sync
         # if num_devices <= 1 and total_mask_sum == 0:
         #     return 0
-        
+
         # Checkpoint steps
         def checkpointed_step(idx, targets, mask, last_shift_states,
                               last_wkv_states):
@@ -949,7 +949,7 @@ class RWKV(L.LightningModule):
             # Get the logits, and the new states
             logits, new_shift_states, new_wkv_states = self(
                 idx, last_shift_states, last_wkv_states)
-            
+
             # Ensure logits, targets, and mask are contiguous
             # this is required to avoid view is not compatible with size and stride error
             logits = logits.contiguous()
@@ -968,7 +968,7 @@ class RWKV(L.LightningModule):
 
             # Submask count
             submask_count = torch.sum(submask)
-            
+
             # Selective token loss logic
             if submask_count <= 0.0:
                 train_loss = torch.tensor(0, dtype=self.emb.weight.dtype).requires_grad_()
@@ -978,7 +978,7 @@ class RWKV(L.LightningModule):
 
             elif self.token_loss_threshold > 0.0 or self.token_dropout_rate > 0.0:
 
-                # Sample loss, without backprop 
+                # Sample loss, without backprop
                 with torch.no_grad():
                     sample_loss = (torch.sum(token_loss * submask) / total_mask_sum).clone().detach().requires_grad_(False)
 
@@ -994,9 +994,9 @@ class RWKV(L.LightningModule):
                 if self.token_dropout_rate > 0.0:
                     dropout_mask = torch.rand(train_mask.shape, device=train_mask.device) > self.token_dropout_rate
                     train_mask = train_mask * dropout_mask
-                
+
                 # The training loss to use
-                train_loss = torch.sum(token_loss * train_mask) / total_mask_sum  
+                train_loss = torch.sum(token_loss * train_mask) / total_mask_sum
                 train_token_count = torch.sum(train_mask)
 
                 # Adjust the factor accordingly
@@ -1018,7 +1018,7 @@ class RWKV(L.LightningModule):
             return sample_loss, segment_train_loss, new_shift_states, new_wkv_states, train_token_count
 
         # Initialize the states, and compute the segment count
-        states = BlockStateList.create(self.n_layer, B, C, 
+        states = BlockStateList.create(self.n_layer, B, C,
                                        self.n_head, self.head_size,
                                        seq.device, self.emb.weight.dtype)
         segment_count = math.ceil(T / self.ctx_len)
@@ -1033,7 +1033,7 @@ class RWKV(L.LightningModule):
         ### ---
         ### Learning process logic (BPTT or not)
         ### ---
-        
+
         #
         # BPTT learning, we split the sequence into segments
         # and perform a backward pass for each segment, on its own.
@@ -1048,7 +1048,7 @@ class RWKV(L.LightningModule):
         # it makes "infctx" size training possible with deepspeed 2/3
         #
         # ---
-        # 
+        #
         # See the following, for more details on "Gradient computed twice" error:
         # https://github.com/microsoft/DeepSpeed/issues/988#issuecomment-1549417269
         #
@@ -1061,7 +1061,7 @@ class RWKV(L.LightningModule):
             gradient_accumulation_steps = max(1, self.trainer.accumulate_grad_batches)
             optimizer = self.optimizers()
             cur_device = self.device
-            
+
             # We use the average segment size, instead of ctx length size.
             # this helps ensure that the segment cutoffs do not make the last segment too small.
             # (eg, the last chunk having only 1 token)
@@ -1082,8 +1082,8 @@ class RWKV(L.LightningModule):
             # where the `self.manual_backward()` / `loss.backward()` call will block / freeze / hang when being too "out of sync"
             #
             # This can be viewed as a form of `fabric.barrier()` which is invoked implicitly by each `self.manual_backward()` call
-            # except that it isn't exactly a `fabric.barrier()` - because it does not block immediately and instead blocks in 
-            # the next `self.manual_backward()` call if the previous ones are too far out of sync. 
+            # except that it isn't exactly a `fabric.barrier()` - because it does not block immediately and instead blocks in
+            # the next `self.manual_backward()` call if the previous ones are too far out of sync.
             # (its confusing, but makes sense for efficency)
             #
             # Additionally because the "code line position" and params actually matter for the 'barrier' code effect,
@@ -1100,10 +1100,10 @@ class RWKV(L.LightningModule):
                     # ---
                     # we map it to be a tensor, instead of the int directly, as this is more reliable across certain versions of torch/lightning
                     # https://discord.com/channels/992359628979568762/1148755392638234697/1148821863749931008
-                    
+
                     if self.device.type == "cuda":
                         forward_segment_count = self.trainer.strategy.reduce(
-                            torch.cuda.IntTensor([segment_count], device=self.device), 
+                            torch.cuda.IntTensor([segment_count], device=self.device),
                             reduce_op="max"
                         )
                     else:
@@ -1142,11 +1142,11 @@ class RWKV(L.LightningModule):
             # # of size equal to forward_segment_count
             # segment_loss_arr = [0] * forward_segment_count
 
-            # Lets go through and forward all the segments 
+            # Lets go through and forward all the segments
             # (including dummy ones)
             for i in range(forward_segment_count):
                 # Apply state truncation, if truncated learning is enabled
-                # this limits the backprop process, reduces loss learning rate, 
+                # this limits the backprop process, reduces loss learning rate,
                 # but save vram across extreamly large backpropagation steps
                 if self.bptt_truncated_learning:
                     prv_shift_states = states.shift_states.clone().detach().requires_grad_(False)
@@ -1154,7 +1154,7 @@ class RWKV(L.LightningModule):
                 else:
                     prv_shift_states = states.shift_states
                     prv_wkv_states = states.wkv_states
-                
+
                 # We use a dummy masked token 0, to do additional dummy checkpoint/forward/backprop when needed
                 # for each additional call after the current "segment_count" max
                 if i <= segment_count - 1:
@@ -1205,7 +1205,7 @@ class RWKV(L.LightningModule):
                 else:
                     # Even if its not the segments we use for backward pass, we still need to accumulate the loss
                     training_loss = training_loss + segment_train_loss.clone().detach().requires_grad_(False)
-                
+
                 # Add token count and raw sampling loss
                 training_tokens = training_tokens + segment_train_tokens
                 sampling_loss = sampling_loss + segment_sample_loss
@@ -1237,7 +1237,7 @@ class RWKV(L.LightningModule):
                         states.shift_states,
                         states.wkv_states
                     )
-                
+
                 # Add them up
                 training_loss = training_loss + segment_train_loss
                 training_tokens = training_tokens + segment_train_tokens
@@ -1271,7 +1271,7 @@ class RWKV(L.LightningModule):
             # Log the line values
             wandb.log({
                 # The original loss and ctx_len (averaged by batch size)
-                'train/data_ctxlen': ctx_len, 
+                'train/data_ctxlen': ctx_len,
                 'train/data_loss': sampling_loss,
                 # "train/dataset_index": dataset_index,
 
@@ -1291,7 +1291,7 @@ class RWKV(L.LightningModule):
                 f'perf/kTokens_total.gpu.{global_rank}': self._counting_tokens,
 
                 # Step and trainer tracking
-                'global_rank': global_rank, 
+                'global_rank': global_rank,
                 'substep': (batch_idx * global_device_count + global_rank),
                 'trainer/global_step':self.global_step,
                 'trainer/learning_rate': self.trainer.optimizers[0].param_groups[0]['lr'],
@@ -1303,7 +1303,7 @@ class RWKV(L.LightningModule):
             # Log the line values
             wandb.log({
                 # The original loss and ctx_len (averaged by batch size)
-                'validation/data_ctxlen': T, 
+                'validation/data_ctxlen': T,
                 'validation/data_loss': sampling_loss,
                 # "validation/dataset_index": dataset_index,
 
@@ -1318,7 +1318,7 @@ class RWKV(L.LightningModule):
                 # f'dataset/validation/{dataset_index}.name': dataset_name,
 
                 # Step and trainer tracking
-                'global_rank': global_rank, 
+                'global_rank': global_rank,
                 'trainer/global_step':self.global_step,
                 'batchidx': batch_idx
             })
@@ -1344,7 +1344,7 @@ class RWKV(L.LightningModule):
         # If set - forces the above train/loss log line to always be on a new line
         if self.substep_logging:
             print("")
-        
+
         if self.substep_cuda_cache_clear:
             gc.collect()
             torch.cuda.empty_cache()
@@ -1451,7 +1451,7 @@ class SimpleRWKV():
 
     # Forwarding logic, withoout torch._no_grad() context
     def _forward(
-            self, tokens, 
+            self, tokens,
             stateObj = None,
             all_logits = False
         ):
@@ -1466,7 +1466,7 @@ class SimpleRWKV():
         else:
             shift_states = stateObj["shift_states"]
             wkv_states = stateObj["wkv_states"]
-        
+
         # The all_logits array, if requested
         all_logits_arr = None
 
@@ -1477,10 +1477,10 @@ class SimpleRWKV():
 
             # Check if tokens are already tensors
             batch_tokens = torch.tensor(
-                token_set, 
+                token_set,
                 dtype=torch.long, device=self.device
             ).unsqueeze(0)
-            
+
             # Compute the logits and state
             logits_arr, shift_states, wkv_states = self.model.forward(
                 batch_tokens, shift_states, wkv_states
@@ -1498,10 +1498,10 @@ class SimpleRWKV():
             return all_logits_arr, { "shift_states": shift_states, "wkv_states": wkv_states }
         else:
             return logits_arr[0][-1], { "shift_states": shift_states, "wkv_states": wkv_states }
-    
+
     # Forwarding logic, with torch._no_grad() context
     def forward(
-            self, tokens:list, 
+            self, tokens:list,
             stateObj = None,
             all_logits = False
         ):
@@ -1510,8 +1510,8 @@ class SimpleRWKV():
 
     # Sampling logits
     def sample_logits(
-            self, logits, 
-            prv_tokens=[0], 
+            self, logits,
+            prv_tokens=[0],
             temperature=1.0, top_p=0.9,
             token_ban: list = []
             ):
@@ -1524,11 +1524,14 @@ class SimpleRWKV():
         # Apply token ban
         for x in token_ban:
             logits[x] = max_neg
-        
-        # Remove NaNs from logits
-        for x in range(len(logits)):
-            if torch.isnan(logits[x]):
-                logits[x] = max_neg
+
+
+        logits = torch.where(torch.isnan(logits), max_neg, logits)
+
+        # # Remove NaNs from logits
+        # for x in range(len(logits)):
+        #     if torch.isnan(logits[x]):
+        #         logits[x] = max_neg
 
         # Handle sampling with temperature
         if temperature > 0.0:
@@ -1541,14 +1544,14 @@ class SimpleRWKV():
                 probs = probs.pow(1.0 / temperature)
             out = torch.multinomial(probs, num_samples=1)[0]
             return out
-        else: 
+        else:
             # Since the tokenizer sample does not support temp==0
             # we handle this case ourself, by fining the top token
             return torch.argmax(logits, dim=-1).item()
 
     # Completion API
-    def completion(self, 
-            prompt, 
+    def completion(self,
+            prompt,
             max_tokens: int = 32,
             temperature: float = 1.0,
             top_p: float = 0.9,
@@ -1580,12 +1583,12 @@ class SimpleRWKV():
         out_tokens = []
         for i in range(max_tokens):
             ttt = self.sample_logits(
-                logits, 
+                logits,
                 # prv_tokens=full_tokens,
                 temperature=temperature, top_p=top_p,
                 token_ban=token_ban
             )
-            
+
             # Append the token
             out_tokens.append(ttt)
             # full_tokens.append(ttt)

@@ -12,6 +12,8 @@ Goal: Experiment with adding Neurallambda stuff to RWKV
 
 I find that RWKV efforts have been splatted across so many repos (and maintainers) that I find it hard to keep track of things. Here are notes I've kept to orient myself during this attempt to adapt RWKV training to `neurallambda`.
 
+- RWKV in easy to read mode: [RWKV_explained](https://github.com/SmerkyG/RWKV_Explained/)
+
 - 2 Trainer repos
   - infctx-trainer
   - RWKV-LM
