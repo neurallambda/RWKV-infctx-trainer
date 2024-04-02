@@ -1,8 +1,25 @@
 #!/bin/bash
 
+##################################################
+#
+#  Sample training pipeline
+#
+#  USAGE:
+#    # Adjust env vars in this file, eg file paths
+#    cd RWKV-v5
+#    chmod +x run/r01_sandbox.sh
+#    ./run/r01_sandbox.sh
+#
+#  OUTPUT:
+#
+#
+##################################################
+
 # Project prefix, for wandb and filename logging
 # follow the format of "discordhandle"-"shortprojectname"
 export PROJECT_PREFIX="r01_sandbox"
+export ROOT_DIR="."
+export PROJECT_DIR="${ROOT_DIR}/run/r01"
 
 # RWKV_NO_CUDA=0 (poor naming) to use CUDA in infctx
 # or RWKV_TORCH_COMPILE=1 to speed up the non-cuda to near CUDA speed
@@ -25,10 +42,6 @@ else
     export WANDB_MODE="disabled"
 fi
 
-# Computing the notebook, and various paths
-export ROOT_DIR="${HOME}/_/neurallambda-RWKV-infctx-trainer"
-export PROJECT_DIR="${ROOT_DIR}/run/r01"
-
 echo "DEEPSPEED_STRAT: ${DEEPSPEED_STRAT}"
 echo "ENABLE_WANDB: ${ENABLE_WANDB}"
 echo "GPU_DEVICES: ${GPU_DEVICES}"
@@ -38,27 +51,26 @@ echo "PROJECT_DIR: ${PROJECT_DIR}"
 export INIT_MODEL_NAME="init.pth"
 
 # Setup the required project directories
-mkdir -p "${PROJECT_DIR}/model/"
 mkdir -p "${PROJECT_DIR}/datapath/"
 mkdir -p "${PROJECT_DIR}/checkpoint/"
 
 
 echo "##################################################"
 echo "INITIALIZING"
-python "${ROOT_DIR}/RWKV-v5/init_model.py" \
+python "${ROOT_DIR}/init_model.py" \
     --n_layer 4 --n_embd 256 \
     --vocab_size world --skip-if-exists \
     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
 echo "##################################################"
-echo "PRELOADING DATAET"
-python "${ROOT_DIR}/RWKV-v5/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
+echo "PRELOADING DATASET"
+python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
 echo "##################################################"
 echo "TRAINING"
-python "${ROOT_DIR}/RWKV-v5/lightning_trainer.py" fit \
+python "${ROOT_DIR}/lightning_trainer.py" fit \
     -c "${PROJECT_DIR}/config.yaml" \
     --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
     --trainer.strategy="${DEEPSPEED_STRAT}" \
@@ -69,11 +81,10 @@ python "${ROOT_DIR}/RWKV-v5/lightning_trainer.py" fit \
 
 echo "##################################################"
 echo "EXPORTING"
-python "${ROOT_DIR}/RWKV-v5/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
+python "${ROOT_DIR}/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
 ls -alh "${PROJECT_DIR}/checkpoint/final.pth"
 
 
 echo "##################################################"
 echo "TESTING"
-export ROOT_DIR="${HOME}/_/neurallambda-RWKV-infctx-trainer"
-python "${ROOT_DIR}/RWKV-v5/dragon_test.py" "${PROJECT_DIR}/checkpoint/final.pth" "cuda fp32"
+python "${ROOT_DIR}/dragon_test.py" "${PROJECT_DIR}/checkpoint/final.pth" "cuda fp32"
