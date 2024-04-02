@@ -5,13 +5,15 @@
 #  Sample training pipeline
 #
 #  USAGE:
-#    # Adjust env vars in this file, eg file paths
+#    # 1.) Adjust env vars in this file, eg file paths
+#    # 2.) Adjust config.yaml paths, eg: ./run/r01/checkpoint
 #    cd RWKV-v5
 #    chmod +x run/r01_sandbox.sh
 #    ./run/r01_sandbox.sh
 #
 #  OUTPUT:
-#
+#    run/r01/checkpoint/  # saved and checkpointed models
+#    run/r01/datapath/    # cached prepared dataset
 #
 ##################################################
 
