@@ -8,6 +8,8 @@ from .module.CoreDependencies import *
 from .module.ChannelMix import RWKV_ChannelMix
 from .module.TimeMix import RWKV_TimeMix
 
+import neurallambda.stack as S
+
 # ---
 # Isolating out known operations that **does not work** with torch.compile
 # and wrapping them within a torch._dynamo.disable, this is required to get
@@ -26,8 +28,23 @@ def deepspeed_checkpoint(*args, **kwargs):
 
 class BlockState:
 
-    def __init__(self, time_mix_state: tuple[torch.Tensor,torch.Tensor],
+    def __init__(self, time_mix_state: tuple[torch.Tensor, torch.Tensor],
                  channel_mix_state: torch.Tensor):
+        '''
+        Ex Shapes:
+
+        (Pdb) bs.time_mix_state[0].shape
+          torch.Size([1, 256])
+
+        (Pdb) bs.time_mix_state[1].shape
+          torch.Size([1, 4, 64, 64])  # 16384 params
+
+        (Pdb) bs.channel_mix_state.shape
+          torch.Size([1, 256])
+
+        '''
+
+
         self.time_mix_state = time_mix_state
         self.channel_mix_state = channel_mix_state
 
@@ -43,7 +60,6 @@ class BlockStateList:
     def create(N, B, C, n_head, head_size, device, dtype):
         result = BlockStateList.empty(N, B, C, n_head, head_size, device, dtype)
         result.wkv_states[:] = 0
-        # result.wkv_states[:, :, :, -1] = -1e38
         result.shift_states[:] = 0
         return result
 
@@ -52,9 +68,7 @@ class BlockStateList:
     def empty(N, B, C, n_head, head_size, device, dtype):
         # @TODO: confirm if dtype can be changed from .flaot to dtype=dtype (when bf16)
         wkv_states = torch.empty((N, B, n_head, head_size, head_size),
-        # wkv_states = torch.empty((N, B, 1, n_head, head_size, head_size),
                                  device=device,
-                                #  dtype=dtype)
                                  dtype=torch.float)
         shift_states = torch.empty((N, 2, B, C), device=device, dtype=dtype)
         return BlockStateList(shift_states, wkv_states)
@@ -151,13 +165,81 @@ class L2Wrap(torch.autograd.Function):
         gy = gy * currentMask.reshape(gy.shape[0],gy.shape[1],1) # currentMask[:, None][None, :]
         return (grad_output, gy, None, None)
 
-### ---
-# Static optimized functions
-### ---
 
-# @ TCompileMax (no speed improvement)
-# def F_cross_entropy_reduction_none_optimized(logits, targets):
-#     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), reduction="none")
+class MyStack(nn.Module):
+    ''' An example NN for controlling the Neuralstack. '''
+    def __init__(self, n_embd):
+        super().__init__()
+        INIT_SHARPEN = 8.0
+        H = 16
+
+        self.n_embd = n_embd
+        self.sharp = nn.Parameter(torch.tensor([INIT_SHARPEN]))
+
+        Op = lambda: nn.Sequential(
+            nn.Linear(n_embd * 2, H),
+            nn.ReLU(),
+            nn.Linear(H, 1, bias=False),
+            nn.Sigmoid()
+        )
+
+        self.push = Op()
+        self.pop = Op()
+        self.nop = Op()
+
+    def forward(self,
+                ss: S.StackState,
+                x : torch.Tensor,
+                bs : BlockState):
+        # (Pdb) x.shape
+        # torch.Size([1, 4, 256])
+        # (Pdb) bs.time_mix_state[0].shape
+        # torch.Size([1, 256])
+        # (Pdb) bs.time_mix_state[1].shape
+        # torch.Size([1, 4, 64, 64])
+        # (Pdb) bs.channel_mix_state.shape
+        # torch.Size([1, 256])
+
+        # print('ss.stack.shape: ', ss.stack.shape)
+        # print('ss.pointer.shape: ', ss.pointer.shape)
+        # print('x.shape: ', x.shape)
+        # print('bs.time_mix_state[0].shape: ', bs.time_mix_state[0].shape)
+        # print('bs.time_mix_state[1].shape: ', bs.time_mix_state[1].shape)
+        # print('bs.channel_mix_state[0].shape: ', bs.channel_mix_state[0].shape)
+
+        batch, n_embd = x.size(0), x.size(2)
+
+        # NOTE: I still don't know what the BlockState values mean exactly, so
+        #       this is just a random decision to use time_mix_state and
+        #       channel_mix_state randomly like this
+        op_h = torch.cat([bs.time_mix_state[0], bs.channel_mix_state], dim=-1)
+        should_push = self.push(op_h).squeeze(1)
+        should_pop = self.pop(op_h).squeeze(1)
+        should_nop = self.nop(op_h).squeeze(1)
+
+        # print()
+        # print(should_push)
+        # print(should_pop)
+        # print(should_nop)
+
+        # (Pdb) should_nop.shape
+        # torch.Size([1])
+        # (Pdb) self.sharp
+        # Parameter containing:
+        # tensor([8.], device='cuda:0', requires_grad=True)
+        # (Pdb) ss.stack.shape
+        # torch.Size([1, 16, 256])
+        # (Pdb) ss.pointer.shape
+        # torch.Size([1, 16])
+
+        repeat = x.size(1) # TODO: Why is the first input shaped different than all next inputs?
+        value = x.sum(dim=1)
+        nss, pop_val = S.push_pop_nop(ss, self.sharp, should_push, should_pop, should_nop, value)
+        pop_val = pop_val.unsqueeze(1).expand(batch, repeat, n_embd)
+
+        assert pop_val.shape == x.shape, breakpoint()
+        return nss, pop_val, bs
+
 
 ### ---
 # Core RWKV module
@@ -167,6 +249,7 @@ class RWKV(L.LightningModule):
     def __init__(self,
                  # Model file path to load from
                  load_model: str,
+
                  # Model size settings, which we either
                  # "auto detect", or use the user specified settings
                  n_embd: int = -1,
@@ -214,7 +297,7 @@ class RWKV(L.LightningModule):
                  dim_ffn: Optional[int] = None,
                  substep_cuda_cache_clear: bool = False,
                  substep_logging: bool = False,
-                 torch_set_float32_matmul_precision:str = 'high'
+                 torch_set_float32_matmul_precision:str = 'high',
                  ):
 
         # Lets save everything in one shot
@@ -328,20 +411,7 @@ class RWKV(L.LightningModule):
             torch.set_float32_matmul_precision(torch_set_float32_matmul_precision)
         self.emb = nn.Embedding(vocab_size, n_embd)
 
-        # load(name=f"wkv_{self.ctx_len}_bf16",
-        #      sources=[
-        #         os.path.join(CUDA_DIR, "wkv_op_bf16.cpp"),
-        #         os.path.join(CUDA_DIR, "wkv_cuda_bf16.cu")
-        #     ],
-        #      verbose=True,
-        #      extra_cflags=["-std=c++17", "-O3", f"-DTmax={self.ctx_len}"],
-        #      extra_cuda_cflags=[
-        #          "-t 4", "-std=c++17", "-res-usage", "--maxrregcount 60",
-        #          "--use_fast_math", "-O3", "-Xptxas -O3",
-        #          "--extra-device-vectorization", f"-DTmax={self.ctx_len}"
-        #      ],
-        #      is_python_module=False)
-
+        # Blocks
         self.blocks = nn.ModuleList([
             Block(i, n_layer, n_embd, n_head, head_size, dropout, dim_att, dim_ffn) for i in range(n_layer)
         ])
@@ -362,6 +432,13 @@ class RWKV(L.LightningModule):
         # Training based timings to track, and initialize
         self._counting_tokens = 0.0
         self._counting_time_start = 0
+
+
+        ##########
+        # Stack
+        self.stack = MyStack(n_embd)
+        self.zero_offset = 1e-6
+        self.n_stack = 16
 
     def configure_optimizers(self):
         if self.bptt_learning == False:
@@ -615,8 +692,11 @@ class RWKV(L.LightningModule):
         return -1
 
     # @TCompileBaseline
-    def forward(self, idx: torch.Tensor, last_shift_states: torch.Tensor = None,
-                last_wkv_states: torch.Tensor = None):
+    def forward(self,
+                idx: torch.Tensor,
+                last_shift_states: torch.Tensor = None,
+                last_wkv_states: torch.Tensor = None,
+                last_stack_states: S.StackState = None):
         B, T = idx.size()
         assert T <= self.ctx_len, "Cannot forward, model ctx_len is exhausted."
 
@@ -640,20 +720,11 @@ class RWKV(L.LightningModule):
         else:
             cur_bs_list = BlockStateList(last_shift_states, last_wkv_states)
 
-        ## The output X token
+        # Init stack
+        if last_stack_states is None:
+            last_stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device)
+
         output_x = x
-
-        ########
-        ### Non forking block loop
-        #######
-
-        # Avoid using the zip operation, as torch.compile throws an exception on it
-        # with `zip not reconized as a valid function`
-        # ---
-        # for i, (block, last_state) in enumerate(
-        #         zip(self.blocks,
-        #             BlockStateList(last_shift_states, last_wkv_states))):
-        # ---
         for i in range(len(self.blocks)):
             block = self.blocks[i]
             last_state = cur_bs_list[i]
@@ -662,112 +733,26 @@ class RWKV(L.LightningModule):
                     block, output_x, last_state)
             else:
                 output_x, new_state = block(output_x, last_state)
+
+            ##########
+            # EXPERIMENT: Neuralstack
+            if i == eval(os.environ['S_STACK_IX']):
+                # output_x = output_x + torch.randn_like(output_x) * eval(os.environ['S_NOISE'])
+                # print()
+                # print('PRE: ', output_x.shape)
+                # new_stack_states = None
+                new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
+                # print('POST: ', output_x.shape)
+
+            ##########
+
             new_states[i] = new_state
-
-        ########
-        ### Forking block loop (its slower sadly)
-        #######
-
-        # # Configuring the chunk sizes
-        # first_round_chunk_size = 256
-
-        # # Next round chunk sizes forumlation
-        # def nextRoundChunkSize(t):
-        #     return first_round_chunk_size
-
-        # # First round, first block
-        # def firstRound_firstBlock_subProcess(
-        #         block:Block, last_state:BlockState,
-        #         in_x:torch.tensor, grad_cp):
-        #     if grad_cp:
-        #         out_x, new_state = deepspeed_checkpoint(
-        #             block, in_x, last_state)
-        #     else:
-        #         out_x, new_state = block(in_x, last_state)
-        #     return out_x, new_state
-
-        # # First round, next block
-        # def firstRound_nextBlock_subProcess(
-        #         block:Block, last_state:BlockState,
-        #         in_x_promise: torch.jit.Future[torch.Tensor],
-        #         grad_cp):
-        #     in_x, prv_layer_state = torch.jit.wait(in_x_promise)
-        #     return firstRound_firstBlock_subProcess(block, last_state, in_x, grad_cp)
-
-        # # Next round, sub process
-        # def nextRound_firstBlock_subProcess(
-        #     block:Block, last_state_promise: torch.jit.Future[BlockState],
-        #     in_x:torch.Tensor, grad_cp):
-        #     last_x, last_state = torch.jit.wait(last_state_promise)
-        #     return firstRound_firstBlock_subProcess(block, last_state, in_x, grad_cp)
-
-        # # Next round, next block
-        # def nextRound_nextBlock_subProcess(
-        #     block:Block, last_state_promise: torch.jit.Future[BlockState],
-        #     in_x_promise: torch.jit.Future[torch.Tensor],
-        #     grad_cp):
-        #     last_x, last_state = torch.jit.wait(last_state_promise)
-        #     in_x, prv_layer_state = torch.jit.wait(in_x_promise)
-        #     return firstRound_firstBlock_subProcess(block, last_state, in_x, grad_cp)
-
-        # # Final x value futures
-        # output_x_futures = []
-
-        # # Highly experimental first round token pass with JIT fork
-        # first_round_futures = []
-        # for i in range(len(self.blocks)):
-        #     if i == 0:
-        #         future = torch.jit.fork(
-        #             firstRound_firstBlock_subProcess, self.blocks[i],
-        #             cur_bs_list[i], x[:,:first_round_chunk_size], self.grad_cp
-        #         )
-        #     else:
-        #         future = torch.jit.fork(
-        #             firstRound_nextBlock_subProcess, self.blocks[i],
-        #             cur_bs_list[i], first_round_futures[i-1], self.grad_cp
-        #         )
-        #     first_round_futures.append(future)
-        # output_x_futures.append(first_round_futures[-1])
-
-        # # Lets start doing the next round iterations
-        # next_round_futures = first_round_futures
-
-        # # Lets start the next round iterations
-        # idx = first_round_chunk_size
-        # while idx < T:
-        #     increment = nextRoundChunkSize(idx)
-        #     for i in range(len(self.blocks)):
-        #         if i == 0:
-        #             future = torch.jit.fork(
-        #                 nextRound_firstBlock_subProcess, self.blocks[i],
-        #                 next_round_futures[i], x[:,idx:idx+increment], self.grad_cp
-        #             )
-        #         else:
-        #             future = torch.jit.fork(
-        #                 nextRound_nextBlock_subProcess, self.blocks[i],
-        #                 next_round_futures[i], next_round_futures[i-1], self.grad_cp
-        #             )
-        #         next_round_futures[i] = future
-        #     output_x_futures.append(next_round_futures[-1])
-        #     idx += increment
-
-        # # Lets get the new states from the final round futures
-        # for i in range(len(self.blocks)):
-        #     tmp_x, new_state = torch.jit.wait(next_round_futures[i])
-        #     new_states[i] = new_state
-
-        # # Lets process the final output_x_futures
-        # output_x, tmp_state = torch.jit.wait(output_x_futures[0])
-        # for i in range(1, len(output_x_futures)):
-        #     tmp_x, tmp_state = torch.jit.wait(output_x_futures[i])
-        #     output_x = torch.cat((output_x, tmp_x), dim=1)
-        # output_x = output_x[:, :T]
 
         # Final layernorm and head output
         output_x = self.ln_out(output_x)
         output_x = self.head(output_x)
 
-        return output_x, new_states.shift_states, new_states.wkv_states
+        return output_x, new_states.shift_states, new_states.wkv_states, new_stack_states
 
     #
     # Custom overwrite of manual_backwards operation, to skip the "manual_backwards"
@@ -826,15 +811,6 @@ class RWKV(L.LightningModule):
         assert isinstance(seq, torch.Tensor) and seq.ndim == 2
         ori_seq_mask = batch['attention_mask']
 
-        # # Get the dataset index
-        # dataset_index = 0
-        # dataset_name = "dataset_0"
-        # if "dataset_index" in batch:
-        #     dataset_index = batch["dataset_index"]
-        #     dataset_name = f"dataset_{dataset_index}"
-        # if "dataset_name" in batch and dataset_name is not None:
-        #     dataset_name = batch["dataset_name"]
-
         # Check if attent mask is set, if not initialize it
         if ori_seq_mask is None or ori_seq_mask.ndim != 2:
             ori_seq_mask = torch.ones_like(seq[:, 1:])
@@ -847,35 +823,6 @@ class RWKV(L.LightningModule):
         # all other GPUs, as such "quick return" on this function
         # should not be allowed
         num_devices = self.trainer.num_devices
-
-        # ### ---
-        # ### Positional loss bias handling
-        # ### ---
-
-        # # Get the starting and ending loss bias
-        # loss_bias_start = self.position_loss_bias
-        # loss_bias_end   = 2.0 - loss_bias_start
-
-        # # Skip loss bias calculation, if loss_bias_start is 1.0
-        # if loss_bias_start == 1.0 or (is_training_run == False and self.position_loss_bias_in_validation == False):
-        #     seq_mask = ori_seq_mask
-        # else:
-        #     # Lets get the torch mask sum
-        #     total_mask_sum = torch.sum(ori_seq_mask)
-
-        #     # Lets get a linear multiplier for the loss bias
-        #     # seq_mask_sum = torch.sum(ori_seq_mask)
-        #     bias_mask = torch.linspace(loss_bias_start, loss_bias_end, int(total_mask_sum.item()), device=ori_seq_mask.device)
-
-        #     # Boolean flag of seq_mask > 0
-        #     seq_mask_index = ori_seq_mask[0] > 0
-
-        #     # Apply the bias mask only to positive seq_mask values
-        #     final_mask = torch.zeros(ori_seq_mask.shape[1], device=ori_seq_mask.device)
-        #     final_mask[seq_mask_index] = ori_seq_mask[0][seq_mask_index] * bias_mask
-
-        #     # And save it as seq_mask
-        #     seq_mask = final_mask.unsqueeze(0)
 
         # Since we are no longer doing positional loss above, use seq_mask directly
         seq_mask = ori_seq_mask
@@ -1453,7 +1400,8 @@ class SimpleRWKV():
     def _forward(
             self, tokens,
             stateObj = None,
-            all_logits = False
+            all_logits = False,
+            stack_states = None,
         ):
 
         logits_arr = None
@@ -1482,8 +1430,8 @@ class SimpleRWKV():
             ).unsqueeze(0)
 
             # Compute the logits and state
-            logits_arr, shift_states, wkv_states = self.model.forward(
-                batch_tokens, shift_states, wkv_states
+            logits_arr, shift_states, wkv_states, stack_states = self.model.forward(
+                batch_tokens, shift_states, wkv_states, stack_states
             )
 
             # Build the all_logits array
@@ -1512,7 +1460,8 @@ class SimpleRWKV():
     def sample_logits(
             self, logits,
             prv_tokens=[0],
-            temperature=1.0, top_p=0.9,
+            temperature=1.0,
+            top_p=0.9,
             token_ban: list = []
             ):
         # Copy to CPU first
@@ -1524,7 +1473,6 @@ class SimpleRWKV():
         # Apply token ban
         for x in token_ban:
             logits[x] = max_neg
-
 
         logits = torch.where(torch.isnan(logits), max_neg, logits)
 
