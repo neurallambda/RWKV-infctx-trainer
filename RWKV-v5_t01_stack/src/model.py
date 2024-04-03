@@ -330,6 +330,10 @@ class RWKV(L.LightningModule):
             # Get the model keys
             model_keys = list(model_weights.keys())
 
+        # print('Weights found on disk:')
+        # for k in model_keys:
+        #     print(k)
+
         # Lets compute the model various sizes, if they are not provided
         if n_layer < 0:
             max_block_id = 0
@@ -423,22 +427,30 @@ class RWKV(L.LightningModule):
         if dropout > 0:
             self.drop0 = nn.Dropout(p = dropout)
 
-        # load the state, and GC the original cpu copy
-        if model_weights != None:
-            self.load_state_dict(model_weights)
-            del model_weights
-            gc.collect()
-
-        # Training based timings to track, and initialize
-        self._counting_tokens = 0.0
-        self._counting_time_start = 0
-
 
         ##########
         # Stack
         self.stack = MyStack(n_embd)
         self.zero_offset = 1e-6
         self.n_stack = 16
+
+
+        ##########
+        # Load Parameters
+
+        # load the state, and GC the original cpu copy
+        if model_weights != None:
+            self.load_state_dict(model_weights)
+            del model_weights
+            gc.collect()
+
+
+        ##########
+        # Training based timings to track, and initialize
+        self._counting_tokens = 0.0
+        self._counting_time_start = 0
+
+
 
     def configure_optimizers(self):
         if self.bptt_learning == False:
@@ -722,7 +734,7 @@ class RWKV(L.LightningModule):
 
         # Init stack
         if last_stack_states is None:
-            last_stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device)
+            last_stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device, dtype=x.dtype)
 
         output_x = x
         for i in range(len(self.blocks)):
@@ -881,9 +893,9 @@ class RWKV(L.LightningModule):
         # if num_devices <= 1 and total_mask_sum == 0:
         #     return 0
 
-        # Checkpoint steps
+        # Checkpoint steps (this is still within `compute_loss`)
         def checkpointed_step(idx, targets, mask, last_shift_states,
-                              last_wkv_states):
+                              last_wkv_states, last_stack_states):
             # # Skip if there is no tokens of value to learn from
             # if idx.shape[1] == 0:
             #     # Prepare dummy loss
@@ -894,8 +906,8 @@ class RWKV(L.LightningModule):
             #     return sample_loss, train_loss, last_shift_states, last_wkv_states, 0
 
             # Get the logits, and the new states
-            logits, new_shift_states, new_wkv_states = self(
-                idx, last_shift_states, last_wkv_states)
+            logits, new_shift_states, new_wkv_states, new_stack_states = self(
+                idx, last_shift_states, last_wkv_states, last_stack_states)
 
             # Ensure logits, targets, and mask are contiguous
             # this is required to avoid view is not compatible with size and stride error
@@ -962,13 +974,21 @@ class RWKV(L.LightningModule):
                 segment_train_loss = L2Wrap.apply(train_loss, logits, L2Wrap_factor, train_mask)
 
             # Return the checkpoint values
-            return sample_loss, segment_train_loss, new_shift_states, new_wkv_states, train_token_count
+            return sample_loss, segment_train_loss, new_shift_states, new_wkv_states, new_stack_states, train_token_count
+
+
+        ##########
+        # (still within `compute_loss`)
 
         # Initialize the states, and compute the segment count
         states = BlockStateList.create(self.n_layer, B, C,
                                        self.n_head, self.head_size,
                                        seq.device, self.emb.weight.dtype)
         segment_count = math.ceil(T / self.ctx_len)
+
+        # Init stack
+        stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device, dtype=self.emb.weight.dtype)
+
 
         # Initialize the training loss, and the token count
         training_loss = torch.tensor(0, dtype=self.emb.weight.dtype).requires_grad_()
@@ -1114,14 +1134,16 @@ class RWKV(L.LightningModule):
                     cur_msk = dummy_empty_zero
 
                 # Segmented learning, applies the forward/pass over each chunk seperately
-                segment_sample_loss, segment_train_loss, new_shift_states, new_wkv_states, segment_train_tokens = checkpointed_step(
+                segment_sample_loss, segment_train_loss, new_shift_states, new_wkv_states, new_stack_states, segment_train_tokens = checkpointed_step(
                     cur_idx,
                     cur_tar,
                     cur_msk,
                     prv_shift_states,
-                    prv_wkv_states
+                    prv_wkv_states,
+                    stack_states
                 )
                 states = BlockStateList(new_shift_states, new_wkv_states)
+                stack_states = new_stack_states
 
                 # # Keep the segment loss (for backpassing in reverse)
                 # segment_loss_arr[i] = segment_loss
@@ -1168,21 +1190,23 @@ class RWKV(L.LightningModule):
             segment_size = self.ctx_len
             for i in range(segment_count):
                 if i < segment_count-1 and is_training_run:
-                    segment_sample_loss, segment_train_loss, new_shift_states, new_wkv_states, segment_train_tokens = deepspeed_checkpoint(
+                    segment_sample_loss, segment_train_loss, new_shift_states, new_wkv_states, new_stack_states, segment_train_tokens = deepspeed_checkpoint(
                         checkpointed_step,
                         idx[:, i * segment_size:(i + 1) * segment_size],
                         targets[:, i * segment_size:(i + 1) * segment_size],
                         seq_mask[:, i * segment_size:(i + 1) * segment_size],
                         states.shift_states,
-                        states.wkv_states
+                        states.wkv_states,
+                        stack_states
                     )
                 else:
-                    segment_sample_loss, segment_train_loss, new_shift_states, new_wkv_states, segment_train_tokens = checkpointed_step(
+                    segment_sample_loss, segment_train_loss, new_shift_states, new_wkv_states, new_stack_states, segment_train_tokens = checkpointed_step(
                         idx[:, i * segment_size:(i + 1) * segment_size],
                         targets[:, i * segment_size:(i + 1) * segment_size],
                         seq_mask[:, i * segment_size:(i + 1) * segment_size],
                         states.shift_states,
-                        states.wkv_states
+                        states.wkv_states,
+                        stack_states
                     )
 
                 # Add them up
@@ -1192,6 +1216,7 @@ class RWKV(L.LightningModule):
 
                 # Update the states
                 states = BlockStateList(new_shift_states, new_wkv_states)
+                stack_states = new_stack_states
                 gc.collect()
                 # torch.cuda.empty_cache()
 

@@ -1,3 +1,53 @@
+'''
+
+----------
+EXAMPLE PARAMS:
+
+emb.weight
+
+blocks.0.ln1.weight
+blocks.0.ln1.bias
+blocks.0.ln2.weight
+blocks.0.ln2.bias
+blocks.0.ln0.weight
+blocks.0.ln0.bias
+blocks.0.att.time_mix_k
+blocks.0.att.time_mix_v
+blocks.0.att.time_mix_r
+blocks.0.att.time_mix_g
+blocks.0.att.time_decay
+blocks.0.att.time_faaaa
+blocks.0.att.receptance.weight
+blocks.0.att.key.weight
+blocks.0.att.value.weight
+blocks.0.att.output.weight
+blocks.0.att.gate.weight
+blocks.0.att.ln_x.weight
+blocks.0.att.ln_x.bias
+blocks.0.ffn.time_mix_k
+blocks.0.ffn.time_mix_r
+blocks.0.ffn.key.weight
+blocks.0.ffn.receptance.weight
+blocks.0.ffn.value.weight
+
+ln_out.weight
+ln_out.bias
+head.weight
+
+stack.sharp
+stack.push.0.weight
+stack.push.0.bias
+stack.push.2.weight
+stack.pop.0.weight
+stack.pop.0.bias
+stack.pop.2.weight
+stack.nop.0.weight
+stack.nop.0.bias
+stack.nop.2.weight
+
+
+'''
+
 import argparse, math, os
 import torch.nn as nn
 import torch
@@ -50,7 +100,13 @@ def init_model(
         gain = 1.0
         scale = 1.0
 
-        if "ln_" in n or ".ln" in n or "time_" in n or "_mask" in n or "pos_emb" in n or '.mask.' in n:
+        if ("ln_" in n or
+            ".ln" in n or
+            "time_" in n or
+            "_mask" in n or
+            "pos_emb" in n or
+            '.mask.' in n or
+            'stack' in n):
             if 'ln_x.weight' in n:
                 # Special ln_x init
                 layer_scale = (1+int(n.split('.')[1])) / layers
@@ -58,6 +114,7 @@ def init_model(
             else:
                 # Skip custom init for these layers
                 m[n] = p
+            # print(f"{str(m[n].shape).ljust(5)} {n}")
         else:
             if n == "emb.weight":
                 # scale = -1 * self.args.lr_init

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import sys
-import yaml 
+import yaml
 import os
 from src.data import RWKVDataModule
+
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 # ----
 # This script is used to preload the huggingface dataset

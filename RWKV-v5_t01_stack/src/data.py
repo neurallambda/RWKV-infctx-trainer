@@ -11,6 +11,9 @@ from transformers import PreTrainedTokenizerFast, AutoTokenizer
 from multiprocessing import cpu_count
 import gc, yaml
 
+# import datasets
+# datasets.utils.logging.set_verbosity_info()
+
 num_cpus = cpu_count()
 num_workers = cpu_count() if cpu_count() < 8 else 8
 
@@ -71,7 +74,7 @@ def prepare_data_static(
         # which causes errors in the trainer
         min_token_size: int = 2,
         max_token_size: int = -1,
-        
+
         # Sort by length
         sort_by_length: bool = False,
         sort_asc: bool = True,
@@ -79,8 +82,8 @@ def prepare_data_static(
         # Dataset offset and limit controls
         dataset_offset: float = -1,
         dataset_length: float = -1,
-        
-        # Custom 'text' column to support, mostly used for dataset where the 
+
+        # Custom 'text' column to support, mostly used for dataset where the
         # desired train data is in another column (eg. 'code')
         custom_text_key: str = None,
         # Multi column merging support, used for instruct/input/output datasets
@@ -164,7 +167,7 @@ def prepare_data_static(
 
         # Skip database setup checks if datapath exists, ignored if using preload_datapath.py
         skip_datapath_setup: bool = False,
-        
+
         # Batch size scanning range, used for deciding the max number of documents
         # to process simultaneously at a time. This is used to prevent OOM errors
         # while rearranging the dataset, etc. Used for both packing / sorting operations
@@ -185,7 +188,7 @@ def prepare_data_static(
         # ----------------------------
 
         # Dataset name, and index
-        # This is only useful for multi dataset packing 
+        # This is only useful for multi dataset packing
         dataset_name: str = None,
         dataset_index: int = 0,
         is_random_datapack: bool = False,
@@ -196,7 +199,7 @@ def prepare_data_static(
 
     # Capture the init parameters
     kargs = locals()
-    
+
     # Check if skip_datapath_setup is enabled
     # useful for extra large datasets
     if kargs["skip_datapath_setup"] == True:
@@ -212,7 +215,7 @@ def prepare_data_static(
     if kargs["source"] is not None:
         if kargs["tokenizer"] is None:
             raise ValueError('Tokenizer must be specified if source is specified')
-        
+
         # =====================================================
 
         # Util functions
@@ -227,7 +230,7 @@ def prepare_data_static(
                 for i in range(min(data_prefix_skip_mask_val, mask_len)):
                     mask[i] = 0
             return mask
-        
+
         # Special handling for binidx
         #--------------------------------
 
@@ -242,7 +245,7 @@ def prepare_data_static(
             # Torch dataset generator wrapper
             def gen():
                 for idx in range(mmap_dataset_len):
-                    # cast to supported types, note that np.int32 limit is 2,147,483,647 
+                    # cast to supported types, note that np.int32 limit is 2,147,483,647
                     # - so unless we have a tokenizer that exceeds this, it should be ok
                     tokens = np.array(mmap_dataset.get(idx), dtype=np.int32)
                     yield {
@@ -261,13 +264,13 @@ def prepare_data_static(
             # The minimum test size is 1, if not we will get errors in the trainer?
             if test_split <= 0 or test_split <= 0.0:
                 test_split = 1
-            
+
             # Force a split, to normlize the dataset format
             src_dataset = raw_src_dataset.train_test_split(
                 test_size=test_split,shuffle=kargs["test_split_shuffle"],
                 seed=42 #Fixed seed, to prevent train/test reshuffling between test runs
             )
-            
+
             # # Save the dataset to disk
             # split_dataset.save_to_disk(kargs["data_path"])
             # # Does nothing else (done)
@@ -278,7 +281,9 @@ def prepare_data_static(
             #--------------------------------
             load_dataset_params = {
                 'path': kargs["source"],
-                'num_proc': num_cpus
+                'num_proc': num_cpus,
+                # 'download_mode': "reuse_dataset_if_exists", # TODO: this doesn't work
+                # 'verification_mode': 'no_checks'
             }
 
             # Handle advance params (if set)
@@ -290,7 +295,7 @@ def prepare_data_static(
                     load_dataset_params[k] = v
 
             # Log the whole load_dataset_params
-            # print("load_dataset_params: " + str(load_dataset_params))
+            print("load_dataset_params: " + str(load_dataset_params))
 
             # The split to use
             source_dataset_split = kargs["source_dataset_split"]
@@ -386,7 +391,7 @@ def prepare_data_static(
                             'token_type_ids': type_arr,
                             'attention_mask': mask_arr
                         }
-                    
+
                     # Else we encode the string and return it following the HF tokenizer format
                     enc_str = world_tokenizer_encode(x, world_add_endoftext_token=world_add_endoftext_token)
                     return {
@@ -397,7 +402,7 @@ def prepare_data_static(
 
                 # We use the HF tokenizer as it is, and get the input_ids
                 return hf_tokenizer(x)
-            
+
             # Multi column merging default values setup
             if kargs["multi_column_keys"] is None:
                 multi_column_keys = ['instruction', 'input', 'output']
@@ -411,7 +416,7 @@ def prepare_data_static(
                 multi_column_suffix = kargs["multi_column_suffix"]
                 multi_column_train_mask = kargs["multi_column_train_mask"]
                 multi_column_separator = kargs["multi_column_separator"]
-            
+
             # Tokenized encodings for multi column keys
             multi_column_enabled = len(multi_column_keys) > 0
             multi_column_prefix_encodings = []
@@ -420,14 +425,14 @@ def prepare_data_static(
 
             # Process the multi column settings
             if multi_column_enabled:
-                
+
                 # Tokenize the multi column strings
                 for i in range(len(multi_column_keys)):
                     if multi_column_prefix is not None and multi_column_prefix[i] is not None:
                         multi_column_prefix_encodings.append(encodeTokens(multi_column_prefix[i]))
                     if multi_column_suffix is not None and multi_column_suffix[i] is not None:
-                        multi_column_suffix_encodings.append(encodeTokens(multi_column_suffix[i]))    
-                
+                        multi_column_suffix_encodings.append(encodeTokens(multi_column_suffix[i]))
+
                 # Tokenize the multi column separator
                 if multi_column_separator is not None and len(multi_column_separator) > 0:
                     multi_column_separator_encodings = encodeTokens(multi_column_separator)
@@ -472,7 +477,7 @@ def prepare_data_static(
                 if kargs["custom_text_key"] is not None:
                     if kargs["custom_text_key"] in x:
                         return encodeTokens(x[kargs["custom_text_key"]])
-                    
+
                 if conversation_enabled:
                     conv_key = kargs['conversation_key'] if 'conversation_key' in kargs else None
                     conversation = x[conv_key] if conv_key is not None else x
@@ -493,7 +498,7 @@ def prepare_data_static(
                                 prefix = conversation_prefix_encoding_map[key] if sender in conversation_prefix_encoding_map else None
 
                                 # Add the prefix
-                                if prefix is not None: 
+                                if prefix is not None:
                                     input_ids += prefix['input_ids']
                                     token_type_ids += prefix['token_type_ids']
                                     attention_mask += prefix['attention_mask']
@@ -512,19 +517,19 @@ def prepare_data_static(
                                     # This means it is false, lets not pay attention to it
                                     attention_mask += ([0] * len(column_encodings['input_ids']))
 
-                                
+
                                 suffix = conversation_suffix_encoding_map[key] if sender in conversation_suffix_encoding_map else None
 
                                 if suffix is not None:
                                     input_ids += suffix['input_ids']
                                     token_type_ids += suffix['token_type_ids']
                                     attention_mask += suffix['attention_mask']
-                    
+
                     elif kargs['conversation_format'] == 'sender':
                         for i in range(len(conversation)):
                             turn = conversation[i]
                             sender = turn[kargs['conversation_sender_key']]
-                                
+
                             for key, value in kargs['conversation_input_key_map'].items():
                                 if key in turn:
                                     # lets get the prefix for this key
@@ -567,7 +572,7 @@ def prepare_data_static(
                         'token_type_ids': token_type_ids,
                         'attention_mask': apply_data_prefix_skip_mask(attention_mask)
                     }
-                        
+
                 # Multi column merging support
                 if multi_column_enabled:
                     # Lets count the number of columns we have
@@ -595,7 +600,7 @@ def prepare_data_static(
                                     input_ids += multi_column_separator_encodings['input_ids']
                                     token_type_ids += multi_column_separator_encodings['token_type_ids']
                                     attention_mask += multi_column_separator_encodings['attention_mask']
-                                
+
                                 # Add the prefix
                                 if len(multi_column_prefix_encodings) > i and multi_column_prefix_encodings[i] is not None:
                                     input_ids += multi_column_prefix_encodings[i]['input_ids']
@@ -619,16 +624,16 @@ def prepare_data_static(
                                 else: # multi_column_train_mask[i] is True
                                     # This means it is true, lets pay attention once again
                                     attention_mask += ([1] * len(column_encodings['input_ids']))
-                                    
+
                                 # Add the suffix
                                 if len(multi_column_suffix_encodings) > i and multi_column_suffix_encodings[i] is not None:
                                     input_ids += multi_column_suffix_encodings[i]['input_ids']
                                     token_type_ids += multi_column_suffix_encodings[i]['token_type_ids']
                                     attention_mask += multi_column_suffix_encodings[i]['attention_mask']
-                                
+
                                 # Set the first item flag to false
                                 is_first_item = False
-                        
+
                         # Return the merged columns
                         return {
                             'input_ids': input_ids,
@@ -664,7 +669,7 @@ def prepare_data_static(
                         'token_type_ids': token_type_ids,
                         'attention_mask': apply_data_prefix_skip_mask(attention_mask),
                     }
-                
+
                 # Fallback to standard text tokenization
                 if 'text' in x:
                     ret = encodeTokens(x['text'])
@@ -673,12 +678,12 @@ def prepare_data_static(
                         'token_type_ids': ret['token_type_ids'],
                         'attention_mask': apply_data_prefix_skip_mask(ret['attention_mask']),
                     }
-                
+
                 raise ValueError('Invalid dataset format, must contain either the configured "multi column" or prompt/completion or text')
 
             # Map the dataset to the tokenizer, removing the old text column
             src_dataset = src_dataset.map(map_tokenizer, batched=False, num_proc=num_cpus)
-            
+
         # =====================================================
 
         # Remove all features, except input_ids, token_type_ids and attention_mask
@@ -686,7 +691,7 @@ def prepare_data_static(
         dataset_features = src_dataset["train"].features
         dataset_features_to_remove = {k: v for k, v in dataset_features.items() if k not in ["input_ids", "token_type_ids", "attention_mask"]}
         src_dataset = src_dataset.remove_columns(list(dataset_features_to_remove.keys()))
-    
+
         # Get the newline token
         endOfDoc_tokenSet = {
             'input_ids': [[0]],
@@ -695,7 +700,7 @@ def prepare_data_static(
         }
 
         # See if rechunking is needed, this is useful mostly for "text" based datasets
-        # where we would need to split them into "digestable" context length sizes 
+        # where we would need to split them into "digestable" context length sizes
         # used for foundation training
         # ---
 
@@ -708,13 +713,13 @@ def prepare_data_static(
 
             # Loop through the x input, and build the raw values
             for i in range(len(x["input_ids"])):
-                # Get the respective values and push them to the 
+                # Get the respective values and push them to the
                 # raw value array, effectively merging the arrays together
                 # with the newline token in between
                 full_input_ids += x["input_ids"][i] + endOfDoc_tokenSet["input_ids"][0]
                 full_token_type_ids += x["token_type_ids"][i] + endOfDoc_tokenSet["token_type_ids"][0]
                 full_attention_mask += apply_data_prefix_skip_mask( x["attention_mask"][i] ) + endOfDoc_tokenSet["attention_mask"][0]
-            
+
             # Total length, and sample count
             # note that thte "remainder" will be discarded
             total_len = len(full_input_ids)
@@ -735,7 +740,7 @@ def prepare_data_static(
                 out_input_ids.append(full_input_ids[start:end])
                 out_token_type_ids.append(full_token_type_ids[start:end])
                 out_attention_mask.append(apply_data_prefix_skip_mask( full_attention_mask[start:end] ))
-            
+
             # Prepare and return the output object
             ret = {
                 'input_ids': out_input_ids,
@@ -743,7 +748,7 @@ def prepare_data_static(
                 'attention_mask': out_attention_mask,
             }
             return ret
-        
+
         # Get the kargs["processing_max_batch_size"], if not set, we will use the full dataset
         processing_max_batch_size = kargs["processing_max_batch_size"]
         if processing_max_batch_size <= 0:
@@ -766,21 +771,21 @@ def prepare_data_static(
 
         # Rechunking happened
         rechunking_happened = False
-        
+
         # Perform rechunking if needed for "text" based datasets
         text_rechunk_size = int(kargs["text_rechunk_size"])
         if text_rechunk_size > 0:
             if kargs["source"] == "text" and (kargs["text_rechunk_auto"] or kargs["text_rechunk_force"]):
                 rechunking_happened = True
-                src_dataset = src_dataset.map(rechunk_text, batched=True, 
+                src_dataset = src_dataset.map(rechunk_text, batched=True,
                                             batch_size=min(text_rechunk_size*8, processing_max_batch_size),
                                             num_proc=num_cpus)
-            
-            # Perform rechunking after filtering, if source is not a "text" based 
+
+            # Perform rechunking after filtering, if source is not a "text" based
             # dataset and text_rechunk_force is enabled
             if kargs["source"] != "text" and kargs["text_rechunk_force"]:
                 rechunking_happened = True
-                src_dataset = src_dataset.map(rechunk_text, batched=True, 
+                src_dataset = src_dataset.map(rechunk_text, batched=True,
                                             batch_size=min(text_rechunk_size*8, processing_max_batch_size),
                                             num_proc=num_cpus)
 
@@ -795,7 +800,7 @@ def prepare_data_static(
                 test_size=test_split,shuffle=kargs["test_split_shuffle"],
                 seed=42 #Fixed seed, to prevent train/test reshuffling between test runs
             )
-        
+
         # Compute the sample length, as requried for the sort by length feature, and packing
         def add_length(example):
             example["sample_length"] = len(example['input_ids'])
@@ -810,13 +815,13 @@ def prepare_data_static(
             else:
                 sort_asc = kargs["sort_asc"]
                 src_dataset['train'] = src_dataset['train'].sort("sample_length", reverse=not sort_asc)
-        
+
         # Implement dataset packing, which merges the dataset row records, into "fixed sizes"
         # this is done by merging multiple dataset samples, with a 0 token in between
         # to form a single dataset sample of the desired size
         #
         # The longest dattaset sample (below the pack size) will be appended with the shortest
-        # dataset samples, until the desired pack size is reached. With the process 
+        # dataset samples, until the desired pack size is reached. With the process
         # repeated for all samples
         #
         # This however will mess up the "real_ctx_len" value, as it will be the length of the
@@ -844,7 +849,7 @@ def prepare_data_static(
 
             # The pack function
             def pack_dataset_in_sequence(x):
-                
+
                 # The return resulting arrays
                 id_arr = []
                 type_arr = []
@@ -853,7 +858,7 @@ def prepare_data_static(
 
                 # batch set chunk counting
                 batchset_chunksize = [0]
-                
+
                 # The total length of the dataset
                 total_len = len(x["input_ids"])
 
@@ -869,9 +874,9 @@ def prepare_data_static(
                     sample_len_arr.append([x["sample_length"][i]])
 
                     # Keep the chunk count in sync
-                    batchset_chunksize[0] = max( 
-                        math.ceil( max(x["sample_length"][i],packing_min_ctx_len) / packing_chunksize ) * packing_chunksize, 
-                        batchset_chunksize[0] 
+                    batchset_chunksize[0] = max(
+                        math.ceil( max(x["sample_length"][i],packing_min_ctx_len) / packing_chunksize ) * packing_chunksize,
+                        batchset_chunksize[0]
                     )
 
                 # Given the datasample index, try to scan and merge into existing samples (if possible)
@@ -884,7 +889,7 @@ def prepare_data_static(
 
                         # Get the current set chunk size
                         current_set_chunk_size = batchset_chunksize[j]
-                        
+
                         # Iterate existing samples for the chunk
                         for k in range( j * packing_chunksize, min((j+1) * packing_chunksize, len(id_arr))):
                             # Get the existing record length
@@ -897,10 +902,10 @@ def prepare_data_static(
                                 type_arr[k] += endOfDoc_tokenSet["token_type_ids"][0] + x["token_type_ids"][i]
                                 mask_arr[k] += endOfDoc_tokenSet["attention_mask"][0] + x["attention_mask"][i]
                                 sample_len_arr[k].append(sample_len)
-                                
+
                                 # Return that a merge has been done
                                 return True
-                            
+
                     # Return that no merge has been done
                     return False
 
@@ -939,15 +944,15 @@ def prepare_data_static(
                 src_dataset['train'] = src_dataset['train'].shuffle(seed=101)
 
             # Perform the dataset packing
-            src_dataset['train'] = src_dataset['train'].map(pack_dataset_in_sequence, batched=True, 
+            src_dataset['train'] = src_dataset['train'].map(pack_dataset_in_sequence, batched=True,
                                         batch_size=min(packing_min_ctx_len*2*3*5, processing_max_batch_size),
                                         num_proc=num_cpus)
 
         # =====================================================
-                                        
-        # Remove the sample_length column, as it is no longer needed / causes problems down the line 
+
+        # Remove the sample_length column, as it is no longer needed / causes problems down the line
         src_dataset['train'] = src_dataset['train'].remove_columns(["sample_length"])
-        
+
         # If an int value is used, it is interprated as document count
         # If a floating value (<1.0) is used, it is interprated as a percentage of the dataset
         if kargs["dataset_offset"] > 0 or kargs["dataset_length"] > 0:
@@ -985,7 +990,7 @@ def prepare_data_static(
         # # Convert to iterable datasets (does not support saving to disk???)
         # src_dataset["train"] = src_dataset["train"].to_iterable_dataset()
         # src_dataset["test"] = src_dataset["test"].to_iterable_dataset()
-        
+
         # # @TODO: Fix dataset_index / name labels
         # # Dataset labeling, for custom wandb graphing
         # if kargs["dataset_name"] is not None or kargs["dataset_index"] >= 0:
@@ -996,7 +1001,7 @@ def prepare_data_static(
         #         if kargs["dataset_index"] >= 0:
         #             x["dataset_index"] = kargs["dataset_index"]
         #         return x
-            
+
         #     # Apply the label function
         #     src_dataset["train"] = src_dataset["train"].map(label_dataset, num_proc=num_cpus)
         #     src_dataset["test"] = src_dataset["test"].map(label_dataset, num_proc=num_cpus)
@@ -1007,7 +1012,7 @@ def prepare_data_static(
         # is not accidentally used by the user for a real file
         if kargs["data_path"] != ".//<#|=@%!$skip_datapath$!%@=|#>//.":
             if kargs["data_path_storage_options"]:
-                
+
                 # import s3fs
                 # fs = s3fs.S3FileSystem(
                 #     key=kargs["data_path_storage_options"]["key"],
@@ -1027,7 +1032,7 @@ def prepare_data_static(
                 # print("fs.ls", fs.ls(""))
 
                 src_dataset.save_to_disk(
-                    kargs["data_path"], 
+                    kargs["data_path"],
                     storage_options=kargs["data_path_storage_options"]
                 )
             else:
@@ -1044,10 +1049,10 @@ def prepare_data_static(
 # Dataloader collator for merging multiple dataset records together
 # we use token 0 for padding, with a learning mask value of 0
 def dataloader_collator_fn(records):
-    # Get the maximum number of records 
+    # Get the maximum number of records
     # (aka the batch size)
     records_len = len(records)
-    
+
     # Compute the total length of the records
     input_ids_len = 0
     # token_type_ids_len = 0
@@ -1075,7 +1080,7 @@ def dataloader_collator_fn(records):
     #     out_index = records[0]["dataset_index"]
     # if "dataset_name" in records:
     #     out_name = records[0]["dataset_name"]
-    
+
 
     # Loop through the records and copy the values to the output arrays
     for i in range(records_len):
@@ -1087,7 +1092,7 @@ def dataloader_collator_fn(records):
         # if i > 0 and out_index > 0 and out_index != records[i]["dataset_index"]:
         #     out_index = -1
         #     out_name = "mixed"
-    
+
     # Build & return the output object
     out = {
         'input_ids': out_input_ids,
@@ -1122,7 +1127,7 @@ def prepare_datapack_static(
     packing_batchsize = 64
     if "packing_batchsize" in datapack_config:
         packing_batchsize = datapack_config["packing_batchsize"]
-    
+
     # Join the various default settings
     defaultVals = { "packing_batchsize": packing_batchsize, "dataset_weight": 1.0 }
     defaultVals = { **defaultVals, **default_config }
@@ -1141,10 +1146,10 @@ def prepare_datapack_static(
 
         # Merge the default config
         one_dataset_config = {
-            **{"skip_datapath_setup":skip_datapath_setup}, 
-            **defaultVals, 
-            **dataset_in, 
-            **{ "dataset_index": i } 
+            **{"skip_datapath_setup":skip_datapath_setup},
+            **defaultVals,
+            **dataset_in,
+            **{ "dataset_index": i }
         }
 
         # Insert the "dataset_name" if "name" is set
@@ -1170,7 +1175,7 @@ def prepare_datapack_static(
             datasets_train_count.append(0)
             datasets_test_count.append(0)
             datasets_train_used_count.append(0)
-        
+
         if "source" in one_dataset_config and one_dataset_config["source"] is not None:
             datasets_arr[i] = prepare_data_static(**one_dataset_config)
         elif one_dataset_config["data_path"] != ".//<#|=@%!$skip_datapath$!%@=|#>//.":
@@ -1200,7 +1205,7 @@ def prepare_datapack_static(
         # Perform GC between sets
         gc.collect()
 
-    # If its preload, skip 
+    # If its preload, skip
     if only_preload:
         print(">> Preload enabled, skipping dataset merging")
         return None
@@ -1225,7 +1230,7 @@ def prepare_datapack_static(
         for i in range(len(datasets_arr)):
             train_dataset.append(datasets_arr[i]["train"])
             test_dataset.append(datasets_arr[i]["test"])
-        
+
         # Build the final training dataset
         final_trainset = concatenate_datasets(train_dataset)
         if mixing_mode == "shuffle":
@@ -1271,7 +1276,7 @@ def prepare_datapack_static(
         #     if i >= len(datasets_train_batches):
         #         datasets_train_batches.append(0)
         #         datasets_test_batches.append(0)
-            
+
         #     # Compute the number of batches for each dataset
         #     datasets_train_batches[i] = math.floor( datasets_train_count[i] * dataset_weight * full_batch_percentage / datapack_batchsize )
         #     datasets_test_batches[i] = math.floor( datasets_test_count[i] / datapack_batchsize )
@@ -1316,20 +1321,20 @@ def prepare_datapack_static(
         #     train_last_randomset_chunk = train_randomset.select(numpy.arange(train_randomset_chunks*datapack_batchsize, train_randomset_len))
         # else:
         #     train_last_randomset_chunk = train_randomset
-        
+
         # # Get the total fullset chunks
         # train_fullset_chunks = math.floor( len(train_fullset) / datapack_batchsize )
 
         # # Lets prepare an array of the various dataset indexes
         # dataset_shuffle_index_arr = list( numpy.arange(0, train_fullset_chunks) )
         # random.Random(101).shuffle(dataset_shuffle_index_arr)
-        
+
         # # Label shuffle index
         # def label_shuffle_index(x, idx):
         #     x["shuffle_index"] = idx
         #     return x
 
-        # # Add a shuffled index to the fullset 
+        # # Add a shuffled index to the fullset
         # train_fullset = train_fullset.map(
         #     label_shuffle_index,
         #     with_indices=True,
@@ -1337,7 +1342,7 @@ def prepare_datapack_static(
         #     batch_size=datapack_batchsize,
         #     num_proc=num_cpus,
         # )
-        
+
         # # Sort the fullset by the shuffle index
         # train_fullset = train_fullset.sort("shuffle_index")
 
@@ -1351,10 +1356,10 @@ def prepare_datapack_static(
     # ---------------------------------
     # Final dataset merger
     # ---------------------------------
-    
+
     # Build the final_dataset
     if final_dataset is None:
-        
+
         # Int type for the dataset (based on index:0 dataset)
         # Note: these are hugging face "Value(dtype=x)", and not the dtype itself
         dataset_input_id_type = datasets_arr[0]["train"].features["input_ids"].feature
@@ -1369,7 +1374,7 @@ def prepare_datapack_static(
             # 'dataset_index': Value(dtype="int16"),
             # 'dataset_name': Value(dtype="string"),
         })
-        
+
         # Build the full train / test split dataset
         final_dataset = Dataset.from_dict({key: [None,None] for key in final_dataset_features}, features=final_dataset_features)
         final_dataset = final_dataset.train_test_split(1,1)
@@ -1385,7 +1390,7 @@ def prepare_datapack_static(
         print(">> Saving dataset to data_path : ", datapack_config["data_path"])
         if "data_path_storage_options" in datapack_config and datapack_config["data_path_storage_options"]:
             final_dataset.save_to_disk(
-                datapack_config["data_path"], 
+                datapack_config["data_path"],
                 storage_options=datapack_config["data_path_storage_options"]
             )
         else:
@@ -1417,7 +1422,7 @@ def prepare_datapack_static(
             'total_tokens': len(x["input_ids"]),
             'valid_tokens': sum(x["attention_mask"]),
         }
-    
+
     # Count the training data
     train_counting = final_dataset["train"].map(compute_lengths, num_proc=num_cpus)
     train_total = sum( train_counting["total_tokens"] )
@@ -1453,7 +1458,7 @@ def prepare_datapack_static(
 # with the dataset loader restored to the correct position. This is a INSANE problem, as it means that the training
 # will start from the beginning of the dataset, and not from the last checkpointed position.
 #
-# See: https://discuss.pytorch.org/t/resume-iterating-dataloader-from-checkpoint-batch-idx/60683/14 
+# See: https://discuss.pytorch.org/t/resume-iterating-dataloader-from-checkpoint-batch-idx/60683/14
 #
 # ## Problem Stage 2:
 # Sound not too hard to solve right?, we can offset the dataset loader as we load it up, or we can skip the first X
@@ -1479,7 +1484,7 @@ class CheckPointResumeSafeDataLoader(DataLoader):
 
     def __iter__(self):
         batch_iterator = super().__iter__()
-        
+
         i = 0
         for batch in batch_iterator:
             i += 1
@@ -1487,7 +1492,7 @@ class CheckPointResumeSafeDataLoader(DataLoader):
             skip_offset = -1
             if self._model is not None:
                 skip_offset = self._model.trainer.fit_loop.epoch_loop._batches_that_stepped * self._model.trainer.accumulate_grad_batches
-            
+
             # We skip the first X steps, which should not be iterated on
             if i <= skip_offset:
                 continue
@@ -1496,11 +1501,11 @@ class CheckPointResumeSafeDataLoader(DataLoader):
 
 class RWKVDataModule(LightningDataModule):
     def __init__(
-        self, 
+        self,
 
         # Skip database setup checks if datapath exists, ignored if using preload_datapath.py
         skip_datapath_setup: bool = False,
-        
+
         # Datapack config yaml to use instead, this overwrites all other settings below
         datapack_config_path:str = None,
 
@@ -1546,7 +1551,7 @@ class RWKVDataModule(LightningDataModule):
         # which causes errors in the trainer
         min_token_size: int = 2,
         max_token_size: int = -1,
-        
+
         # Sort by length
         sort_by_length: bool = False,
         sort_asc: bool = True,
@@ -1554,8 +1559,8 @@ class RWKVDataModule(LightningDataModule):
         # Dataset offset and limit controls
         dataset_offset: float = -1,
         dataset_length: float = -1,
-        
-        # Custom 'text' column to support, mostly used for dataset where the 
+
+        # Custom 'text' column to support, mostly used for dataset where the
         # desired train data is in another column (eg. 'code')
         custom_text_key: str = None,
         # Multi column merging support, used for instruct/input/output datasets
@@ -1659,7 +1664,7 @@ class RWKVDataModule(LightningDataModule):
         self._init_locals = locals()
         del self._init_locals["self"]
         del self._init_locals["__class__"]
-        
+
         super().__init__()
         self.datapack_config_path = datapack_config_path
         self.data_path = data_path
@@ -1675,11 +1680,11 @@ class RWKVDataModule(LightningDataModule):
         # Log to wandb
         if wandb.run is not None:
             wandb.config.update({ "data":dict(self._init_locals) })
-    
+
     # Called once for initial setup
     def prepare_data(self):
         prepare_data_static(**self._init_locals)
-    
+
     # Setup process that is universal
     def _internal_setup(self):
         if self._loaded_dataset is None:
@@ -1737,7 +1742,7 @@ class RWKVDataModule(LightningDataModule):
 
         # # Distributed sampler
         # distributed_sampler = DistributedSampler(
-        #     dataset, 
+        #     dataset,
         #     shuffle=self.dataloader_shuffle_training and not self.sort_by_length,
         #     num_replicas=self.trainer.world_size,
         #     rank=self.trainer.global_rank,
@@ -1746,7 +1751,7 @@ class RWKVDataModule(LightningDataModule):
         # )
 
         _train_sampler = DistributedSampler(
-            dataset, 
+            dataset,
             shuffle=self.dataloader_shuffle_training and not self.sort_by_length,
             num_replicas=self.trainer.world_size,
             rank=self.trainer.global_rank,
@@ -1757,7 +1762,7 @@ class RWKVDataModule(LightningDataModule):
         self._train_sampler.set_epoch(self.trainer.current_epoch)
 
         _train_dataloader = CheckPointResumeSafeDataLoader(
-            dataset, 
+            dataset,
             sampler=_train_sampler,
             shuffle=False,
             # prefetch workers per GPU
@@ -1765,7 +1770,7 @@ class RWKVDataModule(LightningDataModule):
             # Prefetching of X batches
             prefetch_factor=self.dataloader_prefetch_factor,
             # Of batch sizeed datasets
-            batch_size=microbatch_size, 
+            batch_size=microbatch_size,
             # The collation function
             collate_fn=dataloader_collator_fn,
             # Pinned in GPU memory
@@ -1773,7 +1778,7 @@ class RWKVDataModule(LightningDataModule):
         )
 
         return _train_dataloader
-    
+
     # Return the validation dataloader
     def val_dataloader(self):
         self._internal_setup()
@@ -1781,10 +1786,10 @@ class RWKVDataModule(LightningDataModule):
             dataset = self._loaded_dataset['test'];
         else:
             dataset = self._loaded_dataset['train'];
-        
+
         sampler = DistributedSampler(
-            dataset, 
-            shuffle=False, 
+            dataset,
+            shuffle=False,
             num_replicas=self.trainer.world_size,
             rank=self.trainer.global_rank,
             ## This is required due to multi node alignment errors
@@ -1797,7 +1802,7 @@ class RWKVDataModule(LightningDataModule):
             microbatch_size = self.trainer.microbatch_size
 
         return DataLoader(
-            dataset, 
+            dataset,
             sampler=sampler,
             shuffle=False,
             # prefetch workers per GPU
@@ -1805,7 +1810,7 @@ class RWKVDataModule(LightningDataModule):
             # Prefetching 8 batches
             prefetch_factor=self.dataloader_prefetch_factor,
             # Of batch sized datasets
-            batch_size=microbatch_size, 
+            batch_size=microbatch_size,
             # The collation function
             collate_fn=dataloader_collator_fn,
             # Pinned in GPU memory
