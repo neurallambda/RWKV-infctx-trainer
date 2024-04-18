@@ -31,6 +31,10 @@ class BlockState:
     def __init__(self, time_mix_state: tuple[torch.Tensor, torch.Tensor],
                  channel_mix_state: torch.Tensor):
         '''
+        time_mix_state:
+          [0] is the time_mix token shift state,
+          [1] is the time_mix wkv operator state
+
         Ex Shapes:
 
         (Pdb) bs.time_mix_state[0].shape

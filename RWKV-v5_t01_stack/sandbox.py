@@ -75,3 +75,10 @@ total_tokens = len(out_tokens)
 tokens_per_second = total_tokens / total_time
 print(f"Tokens per second: {tokens_per_second:.2f}")
 print(f"Total trainable parameters: {sum(p.numel() for p in model.model.parameters() if p.requires_grad)}")
+
+
+
+
+# from datasets import load_from_disk, load_dataset
+# path = os.path.expanduser('~/_/data/automata_palindrome/data')
+# x = load_dataset(path)

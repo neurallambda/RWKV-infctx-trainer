@@ -6,22 +6,22 @@
 #
 #  USAGE:
 #    # 1.) Adjust env vars in this file, eg file paths
-#    # 2.) Adjust config.yaml paths, eg: ./run/r01/checkpoint
+#    # 2.) Adjust config.yaml paths, eg: ./run/r02/checkpoint
 #    cd RWKV-v5
-#    chmod +x run/r01_sandbox.sh
-#    ./run/r01_sandbox.sh
+#    chmod +x run/r02_palindrome.sh
+#    ./run/r02_palindrome.sh
 #
 #  OUTPUT:
-#    run/r01/checkpoint/  # saved and checkpointed models
-#    run/r01/datapath/    # cached prepared dataset
+#    run/r02/checkpoint/  # saved and checkpointed models
+#    run/r02/datapath/    # cached prepared dataset
 #
 ##################################################
 
 # Project prefix, for wandb and filename logging
 # follow the format of "discordhandle"-"shortprojectname"
-export PROJECT_PREFIX="r01_sandbox"
+export PROJECT_PREFIX="r02_palindrome"
 export ROOT_DIR="."
-export PROJECT_DIR="${ROOT_DIR}/run/r01"
+export PROJECT_DIR="${ROOT_DIR}/run/r02"
 export HF_DATASETS_OFFLINE="1"
 
 # RWKV_NO_CUDA=0 (poor naming) to use CUDA in infctx
@@ -58,16 +58,17 @@ mkdir -p "${PROJECT_DIR}/datapath/"
 mkdir -p "${PROJECT_DIR}/checkpoint/"
 
 
-echo "##################################################"
-echo "INITIALIZING"
-python "${ROOT_DIR}/init_model.py" \
-    --n_layer 4 --n_embd 256 \
-    --vocab_size world --skip-if-exists \
-    "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+# echo "##################################################"
+# echo "INITIALIZING"
+# python "${ROOT_DIR}/init_model.py" \
+#     --n_layer 4 --n_embd 256 \
+#     --vocab_size world --skip-if-exists \
+#     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
 # echo "##################################################"
 # echo "PRELOADING DATASET"
+# # python "preload_datapath.py" "run/r02/config.yaml"
 # python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
