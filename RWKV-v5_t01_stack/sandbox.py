@@ -79,6 +79,16 @@ print(f"Total trainable parameters: {sum(p.numel() for p in model.model.paramete
 
 
 
-# from datasets import load_from_disk, load_dataset
-# path = os.path.expanduser('~/_/data/automata_palindrome/data')
-# x = load_dataset(path)
+
+# ##################################################
+# # debugging ckpt exporter
+
+# CWD = 'RWKV-v5_t01_stack'
+# if CWD not in os.getcwd():
+#     os.chdir(CWD)
+
+# path = './run/r02/checkpoint/last.ckpt/checkpoint/bf16_zero_pp_rank_0_mp_rank_00_optim_states.pt'
+# path2 = './run/r02/checkpoint/last.ckpt/checkpoint/mp_rank_00_model_states.pt'
+
+# opt = torch.load(path)
+# model = torch.load(path2)

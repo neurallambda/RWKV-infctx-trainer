@@ -25,7 +25,7 @@ trainer:
   logger:
     class_path: 'lightning.pytorch.loggers.tensorboard.TensorBoardLogger'
     init_args:
-      save_dir: 'r02/logs/'
+      save_dir: 'run/r02/logs/'
       name: 'r02_palindrome'
       version: 1
 

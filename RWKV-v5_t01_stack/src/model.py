@@ -10,6 +10,24 @@ from .module.TimeMix import RWKV_TimeMix
 
 import neurallambda.stack as S
 
+def debugo(model_weights):
+    print('----------')
+    print('FROZEN_PARAM_SHAPES:')
+    print(model_weights['frozen_param_shapes'])
+
+    print('----------')
+    print('FROZEN_PARAM_FRAGMENTS:')
+    print(model_weights['frozen_param_fragments'])
+
+    print('----------')
+    print('SHARED_PARAMS:')
+    print(model_weights['shared_params'])
+
+    print('----------')
+    print('PARAM_SHAPES:')
+    print(model_weights['param_shapes'])
+
+
 # ---
 # Isolating out known operations that **does not work** with torch.compile
 # and wrapping them within a torch._dynamo.disable, this is required to get
@@ -250,6 +268,24 @@ class MyStack(nn.Module):
 ### ---
 class RWKV(L.LightningModule):
 
+    def on_train_start(self):
+        # Check the model's parameters before training starts
+        for name, param in self.named_parameters():
+            if param.requires_grad:
+                print(f"Parameter {name} is trainable.")
+            else:
+                print(f"Parameter {name} is frozen.")
+
+    # def on_save_checkpoint(self, checkpoint):
+    #     # DEBUG
+    #     model_state_dict = checkpoint["state_dict"]
+    #     for name, param in self.named_parameters():
+    #         if name in model_state_dict:
+    #             print(f"Parameter {name} is present in the checkpoint.")
+    #         else:
+    #             print(f"Parameter {name} is missing from the checkpoint.")
+    #     breakpoint()
+
     def __init__(self,
                  # Model file path to load from
                  load_model: str,
@@ -328,9 +364,18 @@ class RWKV(L.LightningModule):
 
             # Load the model weights
             if IS_TORCH_2_1_COMPATIBLE:
-                model_weights = torch.load(load_model, map_location='cpu', weights_only=True, mmap=True)
+                try:
+                    model_weights = torch.load(load_model, map_location='cpu', weights_only=True, mmap=True)
+                    # model_weights = torch.load(load_model, map_location='cpu', weights_only=False, mmap=True)
+                    # model_weights = model_weights['modules']
+                except:
+                    print('ERROR LOADING WEIGHTS')
+                    # model_weights = torch.load(load_model, map_location='cpu', weights_only=False, mmap=True)
+                    # debugo(model_weights)
+                    breakpoint()
             else:
                 model_weights = torch.load(load_model, map_location='cpu')
+                # model_weights = model_weights['modules']
 
             # Get the model keys
             model_keys = list(model_weights.keys())
@@ -338,6 +383,7 @@ class RWKV(L.LightningModule):
         # print('Weights found on disk:')
         # for k in model_keys:
         #     print(k)
+        # breakpoint()
 
         # Lets compute the model various sizes, if they are not provided
         if n_layer < 0:
@@ -463,7 +509,7 @@ class RWKV(L.LightningModule):
         if self.freeze_embeddings:
             print('Freezing embeddings')
             for param in self.emb.parameters():
-                param.requires_grad = False
+                param.requires_grad_(False)
 
         if self.bptt_learning == False:
             if self.deepspeed_stage >= 2 or self.deepspeed_offload:
@@ -1232,7 +1278,7 @@ class RWKV(L.LightningModule):
                 gc.collect()
                 # torch.cuda.empty_cache()
 
-        # Wandb logging only, if an active run exists (only applies for training)
+
         if wandb.run is not None and is_training_run:
             global_rank = self.global_rank
             global_device_count = self.trainer.num_devices * self.trainer.num_nodes

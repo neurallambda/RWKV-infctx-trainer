@@ -5,11 +5,11 @@ import sys
 # This script is used to export the deepspeed checkpoint into an RWKV model
 #
 # This includes the workaround for a known format issue with the default deepspeed checkpoint exporter
-# 
+#
 # The script was taken and modified from the deepspeed repository, and is used to convert a deepspeed checkpoint
 # into the respective model file. This script, and the deepspeed repo would be covered under the apache-2 license
 # (which is compatible with our apache license)
-# 
+#
 # This can be found at: https://github.com/microsoft/DeepSpeed/blob/aef6c65ce39d191ca31618b2a995599942574fd9/deepspeed/utils/zero_to_fp32.py
 # The modification for deepspeed 1 support is here: https://github.com/microsoft/DeepSpeed/pull/3936
 #
@@ -39,6 +39,13 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 
+# from pytorch_lightning.utilities.deepspeed import (
+#         convert_zero_checkpoint_to_fp32_state_dict,
+#         # get_model_state_file,
+#         # get_optim_files,
+#         # ds_checkpoint_dir
+# )
+
 # while this script doesn't use deepspeed to recover data, since the checkpoints are pickled with
 # DeepSpeed data structures it has to be available in the current python environment.
 from deepspeed.utils import logger
@@ -55,9 +62,9 @@ class zero_model_state:
     ds_version: int
     frozen_param_shapes: dict()
     frozen_param_fragments: dict()
+    module_params: dict() # NOTE: this is a hack bc this isn't resolved: https://github.com/microsoft/DeepSpeed/issues/5439
 
-
-debug = 0
+debug = True
 
 # load to cpu
 device = torch.device('cpu')
@@ -74,23 +81,6 @@ def natural_keys(text):
     (See Toothy's implementation in the comments)
     '''
     return [atoi(c) for c in re.split(r'(\d+)', text)]
-
-
-def get_model_state_file(checkpoint_dir, zero_stage):
-    if not os.path.isdir(checkpoint_dir):
-        raise FileNotFoundError(f"Directory '{checkpoint_dir}' doesn't exist")
-
-    # there should be only one file
-    if zero_stage <= 2:
-        file = os.path.join(checkpoint_dir, "mp_rank_00_model_states.pt")
-    elif zero_stage == 3:
-        file = os.path.join(checkpoint_dir, "zero_pp_rank_0_mp_rank_00_model_states.pt")
-
-    if not os.path.exists(file):
-        raise FileNotFoundError(f"can't find model states file at '{file}'")
-
-    return file
-
 
 def get_checkpoint_files(checkpoint_dir, glob_pattern):
     # XXX: need to test that this simple glob rule works for multi-node setup too
@@ -145,12 +135,24 @@ def parse_model_states(files):
 
         frozen_param_fragments = state_dict.get(FROZEN_PARAM_FRAGMENTS, None)
 
+        # Add missing parameters from 'module'
+        #
+        # NOTE: this is a hack bc this isn't resolved: https://github.com/microsoft/DeepSpeed/issues/5439
+        # Add missing parameters from 'module'
+        module_params = {}
+        for name, param in state_dict["module"].items():
+            if name not in param_names and name not in buffer_names:
+                if debug:
+                    print(f"Adding missing parameter from 'module': {name}")
+                module_params[name] = param
+
         z_model_state = zero_model_state(buffers=buffers,
                                          param_shapes=param_shapes,
                                          shared_params=shared_params,
                                          ds_version=ds_version,
                                          frozen_param_shapes=frozen_param_shapes,
-                                         frozen_param_fragments=frozen_param_fragments)
+                                         frozen_param_fragments=frozen_param_fragments,
+                                         module_params=module_params)
         zero_model_states.append(z_model_state)
 
     return zero_model_states
@@ -345,13 +347,15 @@ def _get_fp32_state_dict_from_zero2_checkpoint(world_size, fp32_flat_groups, zer
         print(f"added {len(buffers)} buffers")
 
     _zero2_merge_frozen_params(state_dict, zero_model_states)
-
     _zero2_merge_trainable_params(state_dict, world_size, fp32_flat_groups, zero_model_states)
 
     # recover shared parameters
     for pair in zero_model_states[0].shared_params:
         if pair[1] in state_dict:
             state_dict[pair[0]] = state_dict[pair[1]]
+
+    # Add missing parameters from 'module_params'
+    state_dict.update(zero_model_states[0].module_params)
 
     return state_dict
 
@@ -470,6 +474,9 @@ def _get_fp32_state_dict_from_zero3_checkpoint(world_size, fp32_flat_groups, zer
     for pair in zero_model_states[0].shared_params:
         if pair[1] in state_dict:
             state_dict[pair[0]] = state_dict[pair[1]]
+
+    # Add missing parameters from 'module_params'
+    state_dict.update(zero_model_states[0].module_params)
 
     return state_dict
 
@@ -613,7 +620,7 @@ if __name__ == "__main__":
                         type=str,
                         help="path to the desired checkpoint folder, e.g., path/checkpoint-12")
 
-    ### Original code ### 
+    ### Original code ###
     # parser.add_argument(
     #     "output_file",
     #     type=str,
@@ -648,5 +655,5 @@ if __name__ == "__main__":
     output_file = args.output_file
     if output_file == "" or output_file is None:
         output_file = os.path.join(args.checkpoint_dir, "rwkv_model.pth")
-    convert_zero_checkpoint_to_fp32_state_dict(args.checkpoint_dir, output_file, save_dtype=args.dtype)
+    convert_zero_checkpoint_to_fp32_state_dict(args.checkpoint_dir, output_file)
     ### RWKV modified code ###
