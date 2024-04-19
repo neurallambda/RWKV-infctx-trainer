@@ -11,6 +11,8 @@ from transformers import PreTrainedTokenizerFast, AutoTokenizer
 from multiprocessing import cpu_count
 import gc, yaml
 
+from functools import partial
+
 # import datasets
 # datasets.utils.logging.set_verbosity_info()
 
@@ -24,6 +26,240 @@ SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 # World tokenizer
 from .dataflow.trie_tokenizer import world_tokenizer_encode
 import numpy as np
+
+
+
+# Maps the dataset record to the tokenized result
+# handles a wide variety of format according to the data configuration
+#
+# - custom text keys
+# - multiple key columns merged
+# - prompt/completion format
+# - text column itself
+#
+# Throws an error, if it failed to process the record
+#
+# This is called for each row record in the dataset
+def map_tokenizer(kargs,
+                  conversation_enabled,
+                  multi_column_enabled,
+                  multi_column_keys,
+                  multi_column_prefix_encodings,
+                  encodeTokens,
+                  multi_column_train_mask,
+                  multi_column_suffix_encodings,
+                  multi_column_separator_encodings,
+                  apply_data_prefix_skip_mask,
+                  x):
+    # Custom text column support
+    if kargs["custom_text_key"] is not None:
+        if kargs["custom_text_key"] in x:
+            return encodeTokens(x[kargs["custom_text_key"]])
+
+    if conversation_enabled:
+        conv_key = kargs['conversation_key'] if 'conversation_key' in kargs else None
+        conversation = x[conv_key] if conv_key is not None else x
+
+        # Array of output values we will return
+        input_ids = []
+        token_type_ids = []
+        attention_mask = []
+
+        if kargs['conversation_format'] == 'iopairs':
+            # lets loop through each io pair
+            for i in range(len(conversation)):
+                # lets loop through each key in the io pair
+                for key, value in conversation[i].items():
+                    # Get the sender key
+                    sender = key
+                    # lets get the prefix for this key
+                    prefix = conversation_prefix_encoding_map[key] if sender in conversation_prefix_encoding_map else None
+
+                    # Add the prefix
+                    if prefix is not None:
+                        input_ids += prefix['input_ids']
+                        token_type_ids += prefix['token_type_ids']
+                        attention_mask += prefix['attention_mask']
+
+                    # Tokenize the column
+                    column_encodings = encodeTokens(value)
+
+                    # Add the column
+                    input_ids += column_encodings['input_ids']
+                    token_type_ids += column_encodings['token_type_ids']
+
+                    if key not in kargs["conversation_input_key_mask"] or kargs["conversation_input_key_mask"][key]:
+                        # If the corresponding `conversation_input_key_mask` is not set, we will assume as valid training data
+                        attention_mask += ([1] * len(column_encodings['input_ids']))
+                    else: # kargs["conversation_input_key_mask"][key] is False
+                        # This means it is false, lets not pay attention to it
+                        attention_mask += ([0] * len(column_encodings['input_ids']))
+
+
+                    suffix = conversation_suffix_encoding_map[key] if sender in conversation_suffix_encoding_map else None
+
+                    if suffix is not None:
+                        input_ids += suffix['input_ids']
+                        token_type_ids += suffix['token_type_ids']
+                        attention_mask += suffix['attention_mask']
+
+        elif kargs['conversation_format'] == 'sender':
+            for i in range(len(conversation)):
+                turn = conversation[i]
+                sender = turn[kargs['conversation_sender_key']]
+
+                for key, value in kargs['conversation_input_key_map'].items():
+                    if key in turn:
+                        # lets get the prefix for this key
+                        prefix = conversation_prefix_encoding_map[key][sender] if sender in conversation_prefix_encoding_map[key] else None
+
+                        # Add the prefix
+                        if prefix is not None:
+                            input_ids += prefix['input_ids']
+                            token_type_ids += prefix['token_type_ids']
+                            attention_mask += prefix['attention_mask']
+
+                        # Tokenize the column
+                        column_encodings = encodeTokens(turn[key])
+
+                        # Add the column
+                        input_ids += column_encodings['input_ids']
+                        token_type_ids += column_encodings['token_type_ids']
+
+                        if sender not in kargs["conversation_sender_mask"] or kargs["conversation_sender_mask"][sender]:
+                            # If the corresponding `conversation_input_key_mask` is not set, we will assume as valid training data
+                            attention_mask += ([1] * len(column_encodings['input_ids']))
+                        else: # kargs["conversation_input_key_mask"][key] is False
+                            # This means it is false, lets not pay attention to it
+                            attention_mask += ([0] * len(column_encodings['input_ids']))
+
+                        suffix = conversation_suffix_encoding_map[sender] if sender in conversation_suffix_encoding_map else None
+
+                        if suffix is not None:
+                            input_ids += suffix['input_ids']
+                            token_type_ids += suffix['token_type_ids']
+                            attention_mask += suffix['attention_mask']
+
+        if len(input_ids) > 0  and conversation_end_of_conversation_token is not None:
+            input_ids += conversation_end_of_conversation_token['input_ids']
+            token_type_ids += conversation_end_of_conversation_token['token_type_ids']
+            attention_mask += conversation_end_of_conversation_token['attention_mask']
+
+        return {
+            'input_ids': input_ids,
+            'token_type_ids': token_type_ids,
+            'attention_mask': apply_data_prefix_skip_mask(attention_mask)
+        }
+
+    # Multi column merging support
+    if multi_column_enabled:
+        # Lets count the number of columns we have
+        # that have data in them
+        num_columns = 0
+        for i in range(len(multi_column_keys)):
+            if multi_column_keys[i] in x and x[multi_column_keys[i]] is not None and len(x[multi_column_keys[i]]) > 0:
+                num_columns += 1
+        # If we have more than 1 column, we will have to merge them
+        if num_columns > 1:
+            # Array of output values we will return
+            input_ids = []
+            token_type_ids = []
+            attention_mask = []
+
+            # First item flag
+            is_first_item = True
+
+            # Lets loop through each column
+            for i in range(len(multi_column_keys)):
+                # And process the column if it has data
+                if multi_column_keys[i] in x and x[multi_column_keys[i]] is not None and len(x[multi_column_keys[i]]) > 0:
+                    # Add the separator if this is not the first item
+                    if not is_first_item and multi_column_separator_encodings is not None:
+                        input_ids += multi_column_separator_encodings['input_ids']
+                        token_type_ids += multi_column_separator_encodings['token_type_ids']
+                        attention_mask += multi_column_separator_encodings['attention_mask']
+
+                    # Add the prefix
+                    if len(multi_column_prefix_encodings) > i and multi_column_prefix_encodings[i] is not None:
+                        input_ids += multi_column_prefix_encodings[i]['input_ids']
+                        token_type_ids += multi_column_prefix_encodings[i]['token_type_ids']
+                        attention_mask += multi_column_prefix_encodings[i]['attention_mask']
+
+                    # Tokenize the column
+                    column_encodings = encodeTokens(x[multi_column_keys[i]])
+
+                    # Add the column
+                    input_ids += column_encodings['input_ids']
+                    token_type_ids += column_encodings['token_type_ids']
+
+                    # Configure the attention masks accordingly
+                    if i > len(multi_column_train_mask):
+                        # If the corresponding `multi_column_train_mask` is not set, we will assume as valid training data
+                        attention_mask += ([1] * len(column_encodings['input_ids']))
+                    elif multi_column_train_mask[i] is False:
+                        # If the `multi_column_train_mask` is set, but configured as false, we should not pay attention to it
+                        attention_mask += ([0] * len(column_encodings['input_ids']))
+                    else: # multi_column_train_mask[i] is True
+                        # This means it is true, lets pay attention once again
+                        attention_mask += ([1] * len(column_encodings['input_ids']))
+
+                    # Add the suffix
+                    if len(multi_column_suffix_encodings) > i and multi_column_suffix_encodings[i] is not None:
+                        input_ids += multi_column_suffix_encodings[i]['input_ids']
+                        token_type_ids += multi_column_suffix_encodings[i]['token_type_ids']
+                        attention_mask += multi_column_suffix_encodings[i]['attention_mask']
+
+                    # Set the first item flag to false
+                    is_first_item = False
+
+            # Return the merged columns
+            return {
+                'input_ids': input_ids,
+                'token_type_ids': token_type_ids,
+                'attention_mask': apply_data_prefix_skip_mask(attention_mask)
+            }
+
+    # Prompt completion support
+    if 'prompt' in x and 'completion' in x:
+        # Array of output values we will return
+        input_ids = None
+        token_type_ids = None
+        attention_mask = None
+
+        # Tokenize both prompt and completion
+        # Note that the tokenizer will process and return the input_ids in batches
+        prompt_encodings = encodeTokens(x['prompt'])
+        completion_encodings = encodeTokens(x['completion'])
+
+        # Join the two input_ids lists
+        input_ids = prompt_encodings['input_ids'] + completion_encodings['input_ids']
+        # Join the two token_type_ids lists
+        token_type_ids = prompt_encodings['token_type_ids'] + completion_encodings['token_type_ids']
+        # Setup the attention mask, 0 for prompt, 1 for completion, if masking is enabled
+        if kargs["disable_prompt_completion_mask"]:
+            attention_mask = ([1] * len(prompt_encodings['input_ids']) + [1] * len(completion_encodings['input_ids']))
+        else:
+            attention_mask = ([0] * len(prompt_encodings['input_ids']) + [1] * len(completion_encodings['input_ids']))
+
+        # Prepare and return the output object
+        return {
+            'input_ids': input_ids,
+            'token_type_ids': token_type_ids,
+            'attention_mask': apply_data_prefix_skip_mask(attention_mask),
+        }
+
+    # Fallback to standard text tokenization
+    if 'text' in x:
+        ret = encodeTokens(x['text'])
+        return {
+            'input_ids': ret['input_ids'],
+            'token_type_ids': ret['token_type_ids'],
+            'attention_mask': apply_data_prefix_skip_mask(ret['attention_mask']),
+        }
+
+    raise ValueError('Invalid dataset format, must contain either the configured "multi column" or prompt/completion or text')
+
+
 
 # We have to extract out the prepare function to be "outside the class"
 # else it will not be hashed / serialized properly, and will produce the following error:
@@ -279,29 +515,37 @@ def prepare_data_static(
         else:
             # Reverting back to general purpose HF dataset / tokenizer handling
             #--------------------------------
-            load_dataset_params = {
-                'path': kargs["source"],
-                'num_proc': num_cpus,
-                # 'download_mode': "reuse_dataset_if_exists", # TODO: this doesn't work
-                # 'verification_mode': 'no_checks'
-            }
 
-            # Handle advance params (if set)
-            if kargs["source_data_dir"] is not None:
-                load_dataset_params['data_dir'] = kargs["source_data_dir"]
-            if kargs["source_dataset_params"] is not None:
-                source_dataset_params = kargs["source_dataset_params"]
-                for k, v in source_dataset_params.items():
-                    load_dataset_params[k] = v
+            if os.path.exists(kargs["source"]):
+                # Load the dataset saved with save_to_disk (will be tokenized,
+                # saved to data_path)
+                src_dataset = load_from_disk(kargs['source'])
+            else:
+                # Load the dataset from HF hub (will be tokenized, saved to
+                # data_path)
+                load_dataset_params = {
+                    'path': kargs["source"],
+                    'num_proc': num_cpus,
+                    # 'download_mode': "reuse_dataset_if_exists", # TODO: this doesn't work
+                    # 'verification_mode': 'no_checks'
+                }
 
-            # Log the whole load_dataset_params
-            print("load_dataset_params: " + str(load_dataset_params))
+                # Handle advance params (if set)
+                if kargs["source_data_dir"] is not None:
+                    load_dataset_params['data_dir'] = kargs["source_data_dir"]
+                if kargs["source_dataset_params"] is not None:
+                    source_dataset_params = kargs["source_dataset_params"]
+                    for k, v in source_dataset_params.items():
+                        load_dataset_params[k] = v
 
-            # The split to use
+                # Log the whole load_dataset_params
+                print("load_dataset_params: " + str(load_dataset_params))
+
+                # The split to use
+                src_dataset = load_dataset(**load_dataset_params)
+
             source_dataset_split = kargs["source_dataset_split"]
 
-            # Load the dataset
-            src_dataset = load_dataset(**load_dataset_params)
 
             # If for some reason the dataset is a "test" only split, and missing a "train" split, we remap it as a "train" split
             if source_dataset_split not in src_dataset.keys():
@@ -461,228 +705,18 @@ def prepare_data_static(
 
                     conversation_enabled = True
 
-            # Maps the dataset record to the tokenized result
-            # handles a wide variety of format according to the data configuration
-            #
-            # - custom text keys
-            # - multiple key columns merged
-            # - prompt/completion format
-            # - text column itself
-            #
-            # Throws an error, if it failed to process the record
-            #
-            # This is called for each row record in the dataset
-            def map_tokenizer(x):
-                # Custom text column support
-                if kargs["custom_text_key"] is not None:
-                    if kargs["custom_text_key"] in x:
-                        return encodeTokens(x[kargs["custom_text_key"]])
-
-                if conversation_enabled:
-                    conv_key = kargs['conversation_key'] if 'conversation_key' in kargs else None
-                    conversation = x[conv_key] if conv_key is not None else x
-
-                    # Array of output values we will return
-                    input_ids = []
-                    token_type_ids = []
-                    attention_mask = []
-
-                    if kargs['conversation_format'] == 'iopairs':
-                        # lets loop through each io pair
-                        for i in range(len(conversation)):
-                            # lets loop through each key in the io pair
-                            for key, value in conversation[i].items():
-                                # Get the sender key
-                                sender = key
-                                # lets get the prefix for this key
-                                prefix = conversation_prefix_encoding_map[key] if sender in conversation_prefix_encoding_map else None
-
-                                # Add the prefix
-                                if prefix is not None:
-                                    input_ids += prefix['input_ids']
-                                    token_type_ids += prefix['token_type_ids']
-                                    attention_mask += prefix['attention_mask']
-
-                                # Tokenize the column
-                                column_encodings = encodeTokens(value)
-
-                                # Add the column
-                                input_ids += column_encodings['input_ids']
-                                token_type_ids += column_encodings['token_type_ids']
-
-                                if key not in kargs["conversation_input_key_mask"] or kargs["conversation_input_key_mask"][key]:
-                                    # If the corresponding `conversation_input_key_mask` is not set, we will assume as valid training data
-                                    attention_mask += ([1] * len(column_encodings['input_ids']))
-                                else: # kargs["conversation_input_key_mask"][key] is False
-                                    # This means it is false, lets not pay attention to it
-                                    attention_mask += ([0] * len(column_encodings['input_ids']))
-
-
-                                suffix = conversation_suffix_encoding_map[key] if sender in conversation_suffix_encoding_map else None
-
-                                if suffix is not None:
-                                    input_ids += suffix['input_ids']
-                                    token_type_ids += suffix['token_type_ids']
-                                    attention_mask += suffix['attention_mask']
-
-                    elif kargs['conversation_format'] == 'sender':
-                        for i in range(len(conversation)):
-                            turn = conversation[i]
-                            sender = turn[kargs['conversation_sender_key']]
-
-                            for key, value in kargs['conversation_input_key_map'].items():
-                                if key in turn:
-                                    # lets get the prefix for this key
-                                    prefix = conversation_prefix_encoding_map[key][sender] if sender in conversation_prefix_encoding_map[key] else None
-
-                                    # Add the prefix
-                                    if prefix is not None:
-                                        input_ids += prefix['input_ids']
-                                        token_type_ids += prefix['token_type_ids']
-                                        attention_mask += prefix['attention_mask']
-
-                                    # Tokenize the column
-                                    column_encodings = encodeTokens(turn[key])
-
-                                    # Add the column
-                                    input_ids += column_encodings['input_ids']
-                                    token_type_ids += column_encodings['token_type_ids']
-
-                                    if sender not in kargs["conversation_sender_mask"] or kargs["conversation_sender_mask"][sender]:
-                                        # If the corresponding `conversation_input_key_mask` is not set, we will assume as valid training data
-                                        attention_mask += ([1] * len(column_encodings['input_ids']))
-                                    else: # kargs["conversation_input_key_mask"][key] is False
-                                        # This means it is false, lets not pay attention to it
-                                        attention_mask += ([0] * len(column_encodings['input_ids']))
-
-                                    suffix = conversation_suffix_encoding_map[sender] if sender in conversation_suffix_encoding_map else None
-
-                                    if suffix is not None:
-                                        input_ids += suffix['input_ids']
-                                        token_type_ids += suffix['token_type_ids']
-                                        attention_mask += suffix['attention_mask']
-
-                    if len(input_ids) > 0  and conversation_end_of_conversation_token is not None:
-                        input_ids += conversation_end_of_conversation_token['input_ids']
-                        token_type_ids += conversation_end_of_conversation_token['token_type_ids']
-                        attention_mask += conversation_end_of_conversation_token['attention_mask']
-
-                    return {
-                        'input_ids': input_ids,
-                        'token_type_ids': token_type_ids,
-                        'attention_mask': apply_data_prefix_skip_mask(attention_mask)
-                    }
-
-                # Multi column merging support
-                if multi_column_enabled:
-                    # Lets count the number of columns we have
-                    # that have data in them
-                    num_columns = 0
-                    for i in range(len(multi_column_keys)):
-                        if multi_column_keys[i] in x and x[multi_column_keys[i]] is not None and len(x[multi_column_keys[i]]) > 0:
-                            num_columns += 1
-                    # If we have more than 1 column, we will have to merge them
-                    if num_columns > 1:
-                        # Array of output values we will return
-                        input_ids = []
-                        token_type_ids = []
-                        attention_mask = []
-
-                        # First item flag
-                        is_first_item = True
-
-                        # Lets loop through each column
-                        for i in range(len(multi_column_keys)):
-                            # And process the column if it has data
-                            if multi_column_keys[i] in x and x[multi_column_keys[i]] is not None and len(x[multi_column_keys[i]]) > 0:
-                                # Add the separator if this is not the first item
-                                if not is_first_item and multi_column_separator_encodings is not None:
-                                    input_ids += multi_column_separator_encodings['input_ids']
-                                    token_type_ids += multi_column_separator_encodings['token_type_ids']
-                                    attention_mask += multi_column_separator_encodings['attention_mask']
-
-                                # Add the prefix
-                                if len(multi_column_prefix_encodings) > i and multi_column_prefix_encodings[i] is not None:
-                                    input_ids += multi_column_prefix_encodings[i]['input_ids']
-                                    token_type_ids += multi_column_prefix_encodings[i]['token_type_ids']
-                                    attention_mask += multi_column_prefix_encodings[i]['attention_mask']
-
-                                # Tokenize the column
-                                column_encodings = encodeTokens(x[multi_column_keys[i]])
-
-                                # Add the column
-                                input_ids += column_encodings['input_ids']
-                                token_type_ids += column_encodings['token_type_ids']
-
-                                # Configure the attention masks accordingly
-                                if i > len(multi_column_train_mask):
-                                    # If the corresponding `multi_column_train_mask` is not set, we will assume as valid training data
-                                    attention_mask += ([1] * len(column_encodings['input_ids']))
-                                elif multi_column_train_mask[i] is False:
-                                    # If the `multi_column_train_mask` is set, but configured as false, we should not pay attention to it
-                                    attention_mask += ([0] * len(column_encodings['input_ids']))
-                                else: # multi_column_train_mask[i] is True
-                                    # This means it is true, lets pay attention once again
-                                    attention_mask += ([1] * len(column_encodings['input_ids']))
-
-                                # Add the suffix
-                                if len(multi_column_suffix_encodings) > i and multi_column_suffix_encodings[i] is not None:
-                                    input_ids += multi_column_suffix_encodings[i]['input_ids']
-                                    token_type_ids += multi_column_suffix_encodings[i]['token_type_ids']
-                                    attention_mask += multi_column_suffix_encodings[i]['attention_mask']
-
-                                # Set the first item flag to false
-                                is_first_item = False
-
-                        # Return the merged columns
-                        return {
-                            'input_ids': input_ids,
-                            'token_type_ids': token_type_ids,
-                            'attention_mask': apply_data_prefix_skip_mask(attention_mask)
-                        }
-
-                # Prompt completion support
-                if 'prompt' in x and 'completion' in x:
-                    # Array of output values we will return
-                    input_ids = None
-                    token_type_ids = None
-                    attention_mask = None
-
-                    # Tokenize both prompt and completion
-                    # Note that the tokenizer will process and return the input_ids in batches
-                    prompt_encodings = encodeTokens(x['prompt'])
-                    completion_encodings = encodeTokens(x['completion'])
-
-                    # Join the two input_ids lists
-                    input_ids = prompt_encodings['input_ids'] + completion_encodings['input_ids']
-                    # Join the two token_type_ids lists
-                    token_type_ids = prompt_encodings['token_type_ids'] + completion_encodings['token_type_ids']
-                    # Setup the attention mask, 0 for prompt, 1 for completion, if masking is enabled
-                    if kargs["disable_prompt_completion_mask"]:
-                        attention_mask = ([1] * len(prompt_encodings['input_ids']) + [1] * len(completion_encodings['input_ids']))
-                    else:
-                        attention_mask = ([0] * len(prompt_encodings['input_ids']) + [1] * len(completion_encodings['input_ids']))
-
-                    # Prepare and return the output object
-                    return {
-                        'input_ids': input_ids,
-                        'token_type_ids': token_type_ids,
-                        'attention_mask': apply_data_prefix_skip_mask(attention_mask),
-                    }
-
-                # Fallback to standard text tokenization
-                if 'text' in x:
-                    ret = encodeTokens(x['text'])
-                    return {
-                        'input_ids': ret['input_ids'],
-                        'token_type_ids': ret['token_type_ids'],
-                        'attention_mask': apply_data_prefix_skip_mask(ret['attention_mask']),
-                    }
-
-                raise ValueError('Invalid dataset format, must contain either the configured "multi column" or prompt/completion or text')
-
             # Map the dataset to the tokenizer, removing the old text column
-            src_dataset = src_dataset.map(map_tokenizer, batched=False, num_proc=num_cpus)
+            src_dataset = src_dataset.map(partial(map_tokenizer,
+                                                  kargs,
+                                                  conversation_enabled,
+                                                  multi_column_enabled,
+                                                  multi_column_keys,
+                                                  multi_column_prefix_encodings,
+                                                  encodeTokens,
+                                                  multi_column_train_mask,
+                                                  multi_column_suffix_encodings,
+                                                  multi_column_separator_encodings,
+                                                  apply_data_prefix_skip_mask), batched=False, num_proc=num_cpus)
 
         # =====================================================
 

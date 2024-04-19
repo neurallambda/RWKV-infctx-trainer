@@ -72,19 +72,19 @@ mkdir -p "${PROJECT_DIR}/checkpoint/"
 # python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
-echo "##################################################"
-echo "TRAINING"
+# echo "##################################################"
+# echo "TRAINING"
 
-export S_STACK_IX="1"
-export S_NOISE="0.3"
+# export S_STACK_IX="1"
+# export S_NOISE="0.3"
 
-python "${ROOT_DIR}/lightning_trainer.py" fit \
-    -c "${PROJECT_DIR}/config.yaml" \
-    --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
-    --trainer.strategy="${DEEPSPEED_STRAT}" \
-    --trainer.devices="${GPU_DEVICES}" \
-    --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
-    --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+# python "${ROOT_DIR}/lightning_trainer.py" fit \
+#     -c "${PROJECT_DIR}/config.yaml" \
+#     --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
+#     --trainer.strategy="${DEEPSPEED_STRAT}" \
+#     --trainer.devices="${GPU_DEVICES}" \
+#     --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
+#     --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
 echo "##################################################"

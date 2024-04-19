@@ -183,4 +183,4 @@ notebook/scratch/*
 
 # misc
 logs/
-go
+*.ipynb

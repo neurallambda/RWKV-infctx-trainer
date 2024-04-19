@@ -1,14 +1,14 @@
 import argparse, math, os
 import torch.nn as nn
 import torch
-from src.model import RWKV 
+from src.model import RWKV
 
 def init_model(
-        layers, embedding_size, vocab_size, output_model_path, 
+        layers, embedding_size, vocab_size, output_model_path,
         skip_if_exists=False, safe_init=False, emb_scale=0.0001
         # existing_model_path=None
         ):
-    
+
     print(f"---- Initializing model ----")
     print(f'No of layers: {layers}')
     print(f'Embedding size: {embedding_size}')
@@ -32,15 +32,15 @@ def init_model(
     parent_dir = os.path.dirname(output_model_path)
     if not os.path.exists(parent_dir):
         os.makedirs(parent_dir)
-    
+
     # Setup the RWKV model, with the special init_model str
     # this disable the loading of the init model file
-    model = RWKV(n_layer=layers, 
-                 n_embd=embedding_size, vocab_size=vocab_size, 
+    model = RWKV(n_layer=layers,
+                 n_embd=embedding_size, vocab_size=vocab_size,
                  load_model=".//<#|=@%!$init_model$!%@=|#>//.",
                  ctx_len=1)
     model_state_dict = model.state_dict()
-    
+
     # Modified init code, from the original init code
     m = {}
     for n in model_state_dict:
@@ -63,7 +63,7 @@ def init_model(
         else:
             if n == "emb.weight":
                 # scale = -1 * self.args.lr_init
-                scale = -1 * abs(emb_scale)
+                scale = -1 * abs(emb_scale)  # negative gets interpreted as `orthogonal` later
             else:
                 if shape[0] > shape[1]:
                     gain = math.sqrt(shape[0] / shape[1])
@@ -92,7 +92,7 @@ def init_model(
         # Ensure its mapped as a CPU & BF16
         m[n] = m[n].cpu()
         m[n] = m[n].bfloat16()
-    
+
     # Save the model
     if safe_init:
         # Save as tmp file, then move to the output path
@@ -128,7 +128,7 @@ def main():
         vocab_size = int(vocab_size)
 
     init_model(
-        args.n_layer, args.n_embd, vocab_size, args.output_model_path, 
+        args.n_layer, args.n_embd, vocab_size, args.output_model_path,
         skip_if_exists=args.skip_if_exists, safe_init=args.safe_init,
         emb_scale=args.emb_scale
     ) #, args.existing_model_path

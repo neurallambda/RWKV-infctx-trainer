@@ -302,6 +302,7 @@ class RWKV(L.LightningModule):
                  substep_cuda_cache_clear: bool = False,
                  substep_logging: bool = False,
                  torch_set_float32_matmul_precision:str = 'high',
+                 freeze_embeddings=False,
                  ):
 
         # Lets save everything in one shot
@@ -417,7 +418,7 @@ class RWKV(L.LightningModule):
         # Matmu precision check
         if torch_set_float32_matmul_precision is not None:
             torch.set_float32_matmul_precision(torch_set_float32_matmul_precision)
-        self.emb = nn.Embedding(vocab_size, n_embd)
+        self.emb = nn.Embedding(vocab_size, n_embd)  # default randn init
 
         # Blocks
         self.blocks = nn.ModuleList([
@@ -437,6 +438,7 @@ class RWKV(L.LightningModule):
         self.stack = MyStack(n_embd)
         self.zero_offset = 1e-6
         self.n_stack = 16
+        self.freeze_embeddings = freeze_embeddings
 
 
         ##########
@@ -457,6 +459,12 @@ class RWKV(L.LightningModule):
 
 
     def configure_optimizers(self):
+        # don't train embeddings
+        if self.freeze_embeddings:
+            print('Freezing embeddings')
+            for param in self.emb.parameters():
+                param.requires_grad = False
+
         if self.bptt_learning == False:
             if self.deepspeed_stage >= 2 or self.deepspeed_offload:
                 print(f"[WARNING]: it is highly recommended to enable bptt_learning when used to deepspeed 2/3/offloading, otherwise an exception will occur when training with dataset records, larger then the configured context length ({self.ctx_len})")
