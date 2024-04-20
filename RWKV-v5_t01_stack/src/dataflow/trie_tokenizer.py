@@ -1,7 +1,7 @@
 ########################################################################################################
 # The RWKV Language Model - https://github.com/BlinkDL/RWKV-LM
 #
-# Original source code for TRIE_TOKENIZER: 
+# Original source code for TRIE_TOKENIZER:
 # https://github.com/BlinkDL/ChatRWKV/blob/1e408fe50d7059bfa4319835f22cbfa88d8ad14e/rwkv_pip_package/src/rwkv/rwkv_tokenizer.py
 # https://github.com/TkskKurumi/ChatRWKV-TRIE-Tokenizer
 ########################################################################################################
@@ -24,7 +24,7 @@ class TRIE:
                 ret.append(fr.ch)
             fr = fr.front
         return "<TRIE %s %s>"%(ret[::-1], self.values)
-    
+
     def add(self, key:bytes, idx:int=0, val=None):
         if(idx == len(key)):
             if(val is None):
@@ -35,11 +35,11 @@ class TRIE:
         if(self.to[ch] is None):
             self.to[ch] = TRIE(front=self, ch=ch)
         return self.to[ch].add(key, idx=idx+1, val=val)
-    
+
     def find_longest(self, key:bytes, idx:int=0):
         u:TRIE = self
         ch:int = key[idx]
-        
+
         while(u.to[ch] is not None):
             u = u.to[ch]
             idx += 1
@@ -65,11 +65,11 @@ class TRIE_TOKENIZER():
             assert len(x) == int(l[l.rindex(' '):])
             sorted += [x]
             self.idx2token[idx] = x
-        
+
         # Add the <|endoftext|> token overwrite
         if add_endoftext_token:
             self.idx2token[0] = b'<|endoftext|>'
-        
+
         self.token2idx = {}
         for k,v in self.idx2token.items():
             self.token2idx[v] = int(k)
@@ -85,7 +85,7 @@ class TRIE_TOKENIZER():
             _idx:int = idx
             idx, _, values = self.root.find_longest(src, idx)
             assert(idx != _idx)
-            _, token = next(iter(values))            
+            _, token = next(iter(values))
             tokens.append(token)
         return tokens
 
@@ -96,7 +96,7 @@ class TRIE_TOKENIZER():
         return self.encodeBytes(src.encode("utf-8"))
 
     def decode(self, tokens):
-        return self.decodeBytes(tokens).decode('utf-8')
+        return self.decodeBytes(tokens).decode('utf-8', errors='replace')
 
     def get_vocab_size(self):
         return self.vocab_size
@@ -108,7 +108,7 @@ class TRIE_TOKENIZER():
         for i in tokens:
             s = self.idx2token[i]
             try:
-                s = s.decode('utf-8')
+                s = s.decode('utf-8', errors='replace')
             except:
                 pass
             print(f'{repr(s)}{i}', end=' ')
@@ -153,10 +153,10 @@ class MT_TRIE_TOKENIZER():
     def __init__(self, filename):
         # self.trie_tokenizer = None
         self.trie_tokenizer = TRIE_TOKENIZER(filename)
-    
+
     def encode(self, src):
-        # Get the encoded tokens, however because this 
-        # is a mix of int and longs, we need to convert 
+        # Get the encoded tokens, however because this
+        # is a mix of int and longs, we need to convert
         # to the torch formatting
         raw_tokens = self.trie_tokenizer.encode(src)
         tokens_len = len(raw_tokens)
@@ -172,7 +172,7 @@ class MT_TRIE_TOKENIZER():
         return tokens
 
     def decode(self, tokens):
-        # We ensure that the tokens are passed as list of int/long 
+        # We ensure that the tokens are passed as list of int/long
         # and not as a torch tensor/numpy array
         tokens_len = len(tokens)
 
@@ -196,4 +196,3 @@ class MT_TRIE_TOKENIZER():
 
         # Decode and return
         return self.trie_tokenizer.decode(clean_tokens)
-        
