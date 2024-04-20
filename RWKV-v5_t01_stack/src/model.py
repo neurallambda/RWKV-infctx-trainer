@@ -10,6 +10,9 @@ from .module.TimeMix import RWKV_TimeMix
 
 import neurallambda.stack as S
 
+S_STACK_IX = eval(os.environ['S_STACK_IX'])
+S_DO_EXPERIMENT = eval(os.environ['S_DO_EXPERIMENT'])
+
 def debugo(model_weights):
     print('----------')
     print('FROZEN_PARAM_SHAPES:')
@@ -268,13 +271,13 @@ class MyStack(nn.Module):
 ### ---
 class RWKV(L.LightningModule):
 
-    def on_train_start(self):
-        # Check the model's parameters before training starts
-        for name, param in self.named_parameters():
-            if param.requires_grad:
-                print(f"Parameter {name} is trainable.")
-            else:
-                print(f"Parameter {name} is frozen.")
+    # def on_train_start(self):
+    #     # Check the model's parameters before training starts
+    #     for name, param in self.named_parameters():
+    #         if param.requires_grad:
+    #             print(f"Parameter {name} is trainable.")
+    #         else:
+    #             print(f"Parameter {name} is frozen.")
 
     # def on_save_checkpoint(self, checkpoint):
     #     # DEBUG
@@ -791,6 +794,7 @@ class RWKV(L.LightningModule):
             cur_bs_list = BlockStateList(last_shift_states, last_wkv_states)
 
         # Init stack
+        new_stack_states = None
         if last_stack_states is None:
             last_stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device, dtype=x.dtype)
 
@@ -806,13 +810,14 @@ class RWKV(L.LightningModule):
 
             ##########
             # EXPERIMENT: Neuralstack
-            if i == eval(os.environ['S_STACK_IX']):
-                # output_x = output_x + torch.randn_like(output_x) * eval(os.environ['S_NOISE'])
-                # print()
-                # print('PRE: ', output_x.shape)
-                # new_stack_states = None
-                new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
-                # print('POST: ', output_x.shape)
+            if S_DO_EXPERIMENT:
+                if i == S_STACK_IX:
+                    # output_x = output_x + torch.randn_like(output_x) * eval(os.environ['S_NOISE'])
+                    # print()
+                    # print('PRE: ', output_x.shape)
+                    # new_stack_states = None
+                    new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
+                    # print('POST: ', output_x.shape)
 
             ##########
 

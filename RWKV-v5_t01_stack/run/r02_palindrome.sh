@@ -1,4 +1,15 @@
 #!/bin/bash
+# exit immediately if any step errors
+set -e
+
+# Function to handle keyboard interrupt
+handle_interrupt() {
+    echo "Script interrupted by user. Exiting..."
+    exit 1
+}
+
+# Register the interrupt handler
+trap handle_interrupt SIGINT
 
 ##################################################
 #
@@ -60,6 +71,7 @@ mkdir -p "${PROJECT_DIR}/checkpoint/"
 ##################################################
 # PARAMS
 
+export S_DO_EXPERIMENT="False"
 export S_STACK_IX="1"
 export S_NOISE="0.3"
 
@@ -72,22 +84,22 @@ export S_NOISE="0.3"
 #     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# # echo "##################################################"
-# # echo "PRELOADING DATASET"
-# # # python "preload_datapath.py" "run/r02/config.yaml"
-# # python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
-
-
 # echo "##################################################"
-# echo "TRAINING"
+# echo "PRELOADING DATASET"
+# # python "preload_datapath.py" "run/r02/config.yaml"
+# python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
-# python "${ROOT_DIR}/lightning_trainer.py" fit \
-#     -c "${PROJECT_DIR}/config.yaml" \
-#     --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
-#     --trainer.strategy="${DEEPSPEED_STRAT}" \
-#     --trainer.devices="${GPU_DEVICES}" \
-#     --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
-#     --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+
+echo "##################################################"
+echo "TRAINING"
+
+python "${ROOT_DIR}/lightning_trainer.py" fit \
+    -c "${PROJECT_DIR}/config.yaml" \
+    --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
+    --trainer.strategy="${DEEPSPEED_STRAT}" \
+    --trainer.devices="${GPU_DEVICES}" \
+    --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
+    --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
 echo "##################################################"
