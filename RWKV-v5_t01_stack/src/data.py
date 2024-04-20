@@ -1527,6 +1527,8 @@ class CheckPointResumeSafeDataLoader(DataLoader):
             if self._model is not None:
                 skip_offset = self._model.trainer.fit_loop.epoch_loop._batches_that_stepped * self._model.trainer.accumulate_grad_batches
 
+            print(f"Batch: {i}, Skip Offset: {skip_offset}")
+
             # We skip the first X steps, which should not be iterated on
             if i <= skip_offset:
                 continue
@@ -1795,7 +1797,8 @@ class RWKVDataModule(LightningDataModule):
         self._train_sampler = _train_sampler
         self._train_sampler.set_epoch(self.trainer.current_epoch)
 
-        _train_dataloader = CheckPointResumeSafeDataLoader(
+        # _train_dataloader = CheckPointResumeSafeDataLoader(
+        _train_dataloader = DataLoader(
             dataset,
             sampler=_train_sampler,
             shuffle=False,

@@ -720,17 +720,17 @@ class RWKV(L.LightningModule):
         if train_dataloader is None:
             train_dataloader = self.trainer.fit_loop._data_source.dataloader()
 
-        # Update the dataloader - to include a reference to the model "self"
-        #
-        # This is an extreamly hacky work around, to ensure we can get the completed step
-        # from the dataloader iteration process - to ensure we properly offset the data
-        # on a checkpoint resumption
-        #
-        # Basically workaround hack for:
-        # https://discuss.pytorch.org/t/resume-iterating-dataloader-from-checkpoint-batch-idx/60683/14
-        #
-        # See: data.py -> CheckPointResumeSafeDataLoader
-        train_dataloader._set_model_self(self)
+        # # Update the dataloader - to include a reference to the model "self"
+        # #
+        # # This is an extreamly hacky work around, to ensure we can get the completed step
+        # # from the dataloader iteration process - to ensure we properly offset the data
+        # # on a checkpoint resumption
+        # #
+        # # Basically workaround hack for:
+        # # https://discuss.pytorch.org/t/resume-iterating-dataloader-from-checkpoint-batch-idx/60683/14
+        # #
+        # # See: data.py -> CheckPointResumeSafeDataLoader
+        # train_dataloader._set_model_self(self)
 
         # Get the number of epochs,
         # use estimated_stepping_batches if max_epochs is set
