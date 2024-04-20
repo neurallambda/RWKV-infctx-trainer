@@ -76,18 +76,18 @@ export S_STACK_IX="1"
 export S_NOISE="0.3"
 
 
-# echo "##################################################"
-# echo "INITIALIZING"
-# python "${ROOT_DIR}/init_model.py" \
-#     --n_layer 4 --n_embd 256 \
-#     --vocab_size world --skip-if-exists \
-#     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+echo "##################################################"
+echo "INITIALIZING"
+python "${ROOT_DIR}/init_model.py" \
+    --n_layer 4 --n_embd 256 \
+    --vocab_size world --skip-if-exists \
+    "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# echo "##################################################"
-# echo "PRELOADING DATASET"
-# # python "preload_datapath.py" "run/r02/config.yaml"
-# python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
+echo "##################################################"
+echo "PRELOADING DATASET"
+# python "preload_datapath.py" "run/r02/config.yaml"
+python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
 echo "##################################################"
