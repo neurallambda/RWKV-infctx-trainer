@@ -71,7 +71,7 @@ mkdir -p "${PROJECT_DIR}/checkpoint/"
 ##################################################
 # PARAMS
 
-export S_DO_EXPERIMENT="False"
+export S_DO_EXPERIMENT="True"
 export S_STACK_IX="1"
 export S_NOISE="0.3"
 
@@ -84,28 +84,28 @@ export S_NOISE="0.3"
 #     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# echo "##################################################"
-# echo "PRELOADING DATASET"
-# # python "preload_datapath.py" "run/r02/config.yaml"
-# python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
+echo "##################################################"
+echo "PRELOADING DATASET"
+# python "preload_datapath.py" "run/r02/config.yaml"
+python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
-# echo "##################################################"
-# echo "TRAINING"
+echo "##################################################"
+echo "TRAINING"
 
-# python "${ROOT_DIR}/lightning_trainer.py" fit \
-#     -c "${PROJECT_DIR}/config.yaml" \
-#     --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
-#     --trainer.strategy="${DEEPSPEED_STRAT}" \
-#     --trainer.devices="${GPU_DEVICES}" \
-#     --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
-#     --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+python "${ROOT_DIR}/lightning_trainer.py" fit \
+    -c "${PROJECT_DIR}/config.yaml" \
+    --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
+    --trainer.strategy="${DEEPSPEED_STRAT}" \
+    --trainer.devices="${GPU_DEVICES}" \
+    --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
+    --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# echo "##################################################"
-# echo "EXPORTING"
-# python "${ROOT_DIR}/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
-# ls -alh "${PROJECT_DIR}/checkpoint/final.pth"
+echo "##################################################"
+echo "EXPORTING"
+python "${ROOT_DIR}/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
+ls -alh "${PROJECT_DIR}/checkpoint/final.pth"
 
 
 echo "##################################################"

@@ -516,10 +516,10 @@ def prepare_data_static(
             # Reverting back to general purpose HF dataset / tokenizer handling
             #--------------------------------
 
-            if os.path.exists(kargs["source"]):
+            if os.path.exists(os.path.expanduser(kargs["source"])):
                 # Load the dataset saved with save_to_disk (will be tokenized,
                 # saved to data_path)
-                src_dataset = load_from_disk(kargs['source'])
+                src_dataset = load_from_disk(os.path.expanduser(kargs['source']))
             else:
                 # Load the dataset from HF hub (will be tokenized, saved to
                 # data_path)

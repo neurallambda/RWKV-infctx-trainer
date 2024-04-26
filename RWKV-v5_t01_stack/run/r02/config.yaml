@@ -167,7 +167,7 @@ data:
   # source: text
   # source: /home/ubuntu/RWKV-LM-LoRA/dataset-text/enwik8.txt
   # source: null
-  source: '/home/person/_/data/automata_palindrome/'
+  source: '~/_/data/automata_palindrome/'
   # source: "neurallambda/automata_palindrome"
 
   # Use data_dir, if you are using source=text/json/etc
