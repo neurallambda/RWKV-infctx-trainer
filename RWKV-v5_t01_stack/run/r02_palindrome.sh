@@ -50,6 +50,20 @@ export ENABLE_WANDB=False
 # Prefixes we will be using
 export WANDB_PREFIX="${PROJECT_PREFIX}"
 
+# Get the current maximum version from the existing logs
+CURRENT_VERSION=$(ls -1v "${PROJECT_DIR}/logs/${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" | grep -oE '[0-9]+' | tail -n 1)
+
+# If CURRENT_VERSION is empty or not a number, set it to 0
+if ! [[ "$CURRENT_VERSION" =~ ^[0-9]+$ ]]; then
+    CURRENT_VERSION=0
+fi
+
+# Increment the version number
+NEXT_VERSION=$((CURRENT_VERSION + 1))
+
+echo "Current Version: $CURRENT_VERSION"
+echo "Next Version: $NEXT_VERSION"
+
 if [ "$ENABLE_WANDB" = "True" ]; then
     export WANDB_MODE="online"
 else
@@ -71,41 +85,42 @@ mkdir -p "${PROJECT_DIR}/checkpoint/"
 ##################################################
 # PARAMS
 
-export S_DO_EXPERIMENT="False"
-export S_STACK_IX="1"
+export S_DO_EXPERIMENT="True"
+export S_STACK_IX="2"
 export S_NOISE="0.3"
 
 
-# echo "##################################################"
-# echo "INITIALIZING"
-# python "${ROOT_DIR}/init_model.py" \
-#     --n_layer 4 --n_embd 256 \
-#     --vocab_size world --skip-if-exists \
-#     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+echo "##################################################"
+echo "INITIALIZING"
+python "${ROOT_DIR}/init_model.py" \
+    --n_layer 4 --n_embd 256 \
+    --vocab_size world --skip-if-exists \
+    "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# echo "##################################################"
-# echo "PRELOADING DATASET"
-# # python "preload_datapath.py" "run/r02/config.yaml"
-# python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
+echo "##################################################"
+echo "PRELOADING DATASET"
+# python "preload_datapath.py" "run/r02/config.yaml"
+python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
-# echo "##################################################"
-# echo "TRAINING"
+echo "##################################################"
+echo "TRAINING"
 
-# python "${ROOT_DIR}/lightning_trainer.py" fit \
-#     -c "${PROJECT_DIR}/config.yaml" \
-#     --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
-#     --trainer.strategy="${DEEPSPEED_STRAT}" \
-#     --trainer.devices="${GPU_DEVICES}" \
-#     --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
-#     --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+python "${ROOT_DIR}/lightning_trainer.py" fit \
+    -c "${PROJECT_DIR}/config.yaml" \
+    --trainer.logger.init_args.name="${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" \
+    --trainer.logger.init_args.version="${NEXT_VERSION}" \
+    --trainer.strategy="${DEEPSPEED_STRAT}" \
+    --trainer.devices="${GPU_DEVICES}" \
+    --trainer.callbacks.init_args.dirpath="${PROJECT_DIR}/checkpoint" \
+    --model.load_model="${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# echo "##################################################"
-# echo "EXPORTING"
-# python "${ROOT_DIR}/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
-# ls -alh "${PROJECT_DIR}/checkpoint/final.pth"
+echo "##################################################"
+echo "EXPORTING"
+python "${ROOT_DIR}/export_checkpoint.py" "${PROJECT_DIR}/checkpoint/last.ckpt" "${PROJECT_DIR}/checkpoint/final.pth"
+ls -alh "${PROJECT_DIR}/checkpoint/final.pth"
 
 
 echo "##################################################"

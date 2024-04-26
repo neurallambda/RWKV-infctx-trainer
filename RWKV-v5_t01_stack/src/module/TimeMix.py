@@ -365,6 +365,7 @@ class RWKV_TimeMix(JITModClass):
         return (x_logits, (shift_state_out,wkv_state))
 
 
+# NOTE: Not actually used anywhere, the for-loop is obviated in real code
 def compute_wkv_state(
         k, v, r,
         time_faaaa: torch.nn.Parameter,

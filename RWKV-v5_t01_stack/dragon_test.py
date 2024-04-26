@@ -77,7 +77,7 @@ prompts = ["""
 
 for prompt in prompts:
     print('----------')
-    model.completion(prompt, stream_to_stdout=True, max_tokens=LENGTH, temperature=0.0)
+    model.completion(prompt.strip(), stream_to_stdout=True, max_tokens=LENGTH, temperature=0.0)
 
 # Empty new line, to make the CLI formatting better
 print("")

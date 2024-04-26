@@ -555,9 +555,9 @@ class RWKV(L.LightningModule):
             model_args["__lr_init"] = lr_init
             model_args["__lr_final"] = lr_final
 
-            # Update WANDB
-            if wandb.run is not None:
-                wandb.config.update({ "model": model_args })
+            # # Update WANDB
+            # if wandb.run is not None:
+            #     wandb.config.update({ "model": model_args })
 
         # Setup layerwise learning rate
         if self.layerwise_lr:
@@ -1284,79 +1284,79 @@ class RWKV(L.LightningModule):
                 # torch.cuda.empty_cache()
 
 
-        if wandb.run is not None and is_training_run:
-            global_rank = self.global_rank
-            global_device_count = self.trainer.num_devices * self.trainer.num_nodes
-            microbatch_size = self.trainer.microbatch_size
+        # if wandb.run is not None and is_training_run:
+        #     global_rank = self.global_rank
+        #     global_device_count = self.trainer.num_devices * self.trainer.num_nodes
+        #     microbatch_size = self.trainer.microbatch_size
 
-            # Get the total dataset context length
-            batch_ctx_len = 0
-            if "data_ctx_len" in batch:
-                batch_ctx_len = torch.sum(batch["data_ctx_len"]).item()
-            else:
-                batch_ctx_len = T * microbatch_size
+        #     # Get the total dataset context length
+        #     batch_ctx_len = 0
+        #     if "data_ctx_len" in batch:
+        #         batch_ctx_len = torch.sum(batch["data_ctx_len"]).item()
+        #     else:
+        #         batch_ctx_len = T * microbatch_size
 
-            # Increment the counting tokens, and log it accordingly
-            self._counting_tokens += batch_ctx_len / 1000.0
+        #     # Increment the counting tokens, and log it accordingly
+        #     self._counting_tokens += batch_ctx_len / 1000.0
 
-            # Calculate various log values
-            ctx_len = batch_ctx_len / microbatch_size
-            tokens = training_tokens / microbatch_size
+        #     # Calculate various log values
+        #     ctx_len = batch_ctx_len / microbatch_size
+        #     tokens = training_tokens / microbatch_size
 
-            # Log the line values
-            wandb.log({
-                # The original loss and ctx_len (averaged by batch size)
-                'train/data_ctxlen': ctx_len,
-                'train/data_loss': sampling_loss,
-                # "train/dataset_index": dataset_index,
+        #     # Log the line values
+        #     wandb.log({
+        #         # The original loss and ctx_len (averaged by batch size)
+        #         'train/data_ctxlen': ctx_len,
+        #         'train/data_loss': sampling_loss,
+        #         # "train/dataset_index": dataset_index,
 
-                # The selective training tokens, and loss
-                'train/learn_tokens': tokens,
-                'train/learn_loss': training_loss,
+        #         # The selective training tokens, and loss
+        #         'train/learn_tokens': tokens,
+        #         'train/learn_loss': training_loss,
 
-                # # Dataset based tracking (not working)
-                # f'dataset/train/{dataset_index}.loss': training_loss,
-                # f'dataset/train/{dataset_index}.data_loss': sampling_loss,
-                # f'dataset/train/{dataset_index}.tokens': tokens,
-                # f'dataset/train/{dataset_index}.ctx_len': ctx_len,
-                # f'dataset/train/{dataset_index}.name': dataset_name,
+        #         # # Dataset based tracking (not working)
+        #         # f'dataset/train/{dataset_index}.loss': training_loss,
+        #         # f'dataset/train/{dataset_index}.data_loss': sampling_loss,
+        #         # f'dataset/train/{dataset_index}.tokens': tokens,
+        #         # f'dataset/train/{dataset_index}.ctx_len': ctx_len,
+        #         # f'dataset/train/{dataset_index}.name': dataset_name,
 
-                # Perf tracking
-                f'perf/kTokens_per_sec.gpu.{global_rank}': self._counting_tokens / max(time.time() - self._counting_time_start, 1),
-                f'perf/kTokens_total.gpu.{global_rank}': self._counting_tokens,
+        #         # Perf tracking
+        #         f'perf/kTokens_per_sec.gpu.{global_rank}': self._counting_tokens / max(time.time() - self._counting_time_start, 1),
+        #         f'perf/kTokens_total.gpu.{global_rank}': self._counting_tokens,
 
-                # Step and trainer tracking
-                'global_rank': global_rank,
-                'substep': (batch_idx * global_device_count + global_rank),
-                'trainer/global_step':self.global_step,
-                'trainer/learning_rate': self.trainer.optimizers[0].param_groups[0]['lr'],
-                'batchidx': batch_idx
-            })
-        if wandb.run is not None and is_validation_run:
-            global_rank = self.global_rank
+        #         # Step and trainer tracking
+        #         'global_rank': global_rank,
+        #         'substep': (batch_idx * global_device_count + global_rank),
+        #         'trainer/global_step':self.global_step,
+        #         'trainer/learning_rate': self.trainer.optimizers[0].param_groups[0]['lr'],
+        #         'batchidx': batch_idx
+        #     })
+        # if wandb.run is not None and is_validation_run:
+        #     global_rank = self.global_rank
 
-            # Log the line values
-            wandb.log({
-                # The original loss and ctx_len (averaged by batch size)
-                'validation/data_ctxlen': T,
-                'validation/data_loss': sampling_loss,
-                # "validation/dataset_index": dataset_index,
+        #     # Log the line values
+        #     wandb.log({
+        #         # The original loss and ctx_len (averaged by batch size)
+        #         'validation/data_ctxlen': T,
+        #         'validation/data_loss': sampling_loss,
+        #         # "validation/dataset_index": dataset_index,
 
-                # The selective training tokens, and loss
-                'validation/learn_tokens': training_tokens,
-                'validation/learn_loss': training_loss,
+        #         # The selective training tokens, and loss
+        #         'validation/learn_tokens': training_tokens,
+        #         'validation/learn_loss': training_loss,
 
-                # # Dataset based tracking (not working)
-                # f'dataset/validation/{dataset_index}.loss': training_loss,
-                # f'dataset/validation/{dataset_index}.data_loss': sampling_loss,
-                # f'dataset/validation/{dataset_index}.ctx_len': T,
-                # f'dataset/validation/{dataset_index}.name': dataset_name,
+        #         # # Dataset based tracking (not working)
+        #         # f'dataset/validation/{dataset_index}.loss': training_loss,
+        #         # f'dataset/validation/{dataset_index}.data_loss': sampling_loss,
+        #         # f'dataset/validation/{dataset_index}.ctx_len': T,
+        #         # f'dataset/validation/{dataset_index}.name': dataset_name,
 
-                # Step and trainer tracking
-                'global_rank': global_rank,
-                'trainer/global_step':self.global_step,
-                'batchidx': batch_idx
-            })
+        #         # Step and trainer tracking
+        #         'global_rank': global_rank,
+        #         'trainer/global_step':self.global_step,
+        #         'batchidx': batch_idx
+        #     })
 
         # Throw if total loss is NaN
         assert not torch.isnan(training_loss), "training_loss is NaN"
