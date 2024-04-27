@@ -26,7 +26,7 @@ if len(sys.argv) >= 3:
     RAW_DEVICE = sys.argv[2]
 
 # Get the output length
-LENGTH=200
+LENGTH=16
 if len(sys.argv) >= 4:
     LENGTH=int(sys.argv[3])
 
@@ -53,26 +53,11 @@ model = SimpleRWKV(MODEL_PATH, device=DEVICE, dtype=DTYPE)
 model.completion("\nIn a shocking finding", max_tokens=1, temperature=1.0, top_p=0.7)
 
 # Go
-prompts = ["""
-# Is Palindrome?:
-^ a b c | c b a $
-# Answer:
-""",
-"""
-# Is Palindrome?:
-^ a b c | b c a $
-# Answer:
-""",
-"""
-# Is Palindrome?:
-^ f g h | h g f $
-# Answer:
-""",
-"""
-# Is Palindrome?:
-^ h f h | h f h $
-# Answer:
-"""
+prompts = [
+    """# Is Palindrome?: ^ a b c | c b a $ # Answer:""",
+    """# Is Palindrome?: ^ a b c | b c a $ # Answer:""",
+    """# Is Palindrome?: ^ f g h | h g f $ # Answer:""",
+    """# Is Palindrome?: ^ h f h | h f h $ # Answer:"""
 ]
 
 for prompt in prompts:

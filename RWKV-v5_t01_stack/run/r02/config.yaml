@@ -81,7 +81,7 @@ trainer:
   # Generally what you want to configure is the maximum number of epochs
   # Leave it as -1, and it will keep going forever till interrupted
   # Or set it as a number, and it will stop after that number of epochs
-  max_epochs: 10
+  max_epochs: 4
   min_epochs: null
 
   # Number of datasamples to train for each step, a data sample is considered
@@ -222,11 +222,13 @@ data:
   # A minimum of 2 columns is required, with non empty data, for the merge to occur
   # If no match is found, this will fallback to the default prompt/completion or text column,
   # or throw an error if the default fallback is not found
+  #
+  # NOTE: to write newlines, make sure strings are defined in double quotes "...", not '...'
   # ---
   multi_column_keys: ['text', 'label']
-  multi_column_prefix: ['# Is Palindrome?:\n', '# Answer:\n']
+  multi_column_prefix: ["# Is Palindrome?: ", "# Answer: "]
   multi_column_train_mask: [true, true]
-  multi_column_separator: '\n\n'
+  multi_column_separator: ""
 
   # If processing prompt/completion jsonl pairs, the prompt is masked by default
   # use this flag to disable this default behaviour

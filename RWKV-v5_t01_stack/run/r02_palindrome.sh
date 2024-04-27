@@ -28,8 +28,7 @@ trap handle_interrupt SIGINT
 #
 ##################################################
 
-# Project prefix, for wandb and filename logging
-# follow the format of "discordhandle"-"shortprojectname"
+# Project prefix for filename logging
 export PROJECT_PREFIX="r02_palindrome"
 export ROOT_DIR="."
 export PROJECT_DIR="${ROOT_DIR}/run/r02"
@@ -45,17 +44,13 @@ export MODEL_VERSION="v5"
 # Deepspeed strategy to use, you can leave this unchanged
 export DEEPSPEED_STRAT="deepspeed_stage_1"
 export GPU_DEVICES="auto"
-export ENABLE_WANDB=False
-
-# Prefixes we will be using
-export WANDB_PREFIX="${PROJECT_PREFIX}"
 
 # Get the current maximum version from the existing logs
-CURRENT_VERSION=$(ls -1v "${PROJECT_DIR}/logs/${WANDB_PREFIX} training (${DEEPSPEED_STRAT})" | grep -oE '[0-9]+' | tail -n 1)
+CURRENT_VERSION=$(ls -1v "${PROJECT_DIR}/logs/${PROJECT_PREFIX}" | grep -oE '[0-9]+' | tail -n 1)
 
 # If CURRENT_VERSION is empty or not a number, set it to 0
 if ! [[ "$CURRENT_VERSION" =~ ^[0-9]+$ ]]; then
-    CURRENT_VERSION=0
+    CURRENT_VERSION=1
 fi
 
 # Increment the version number
@@ -63,12 +58,6 @@ NEXT_VERSION=$((CURRENT_VERSION + 1))
 
 echo "Current Version: $CURRENT_VERSION"
 echo "Next Version: $NEXT_VERSION"
-
-if [ "$ENABLE_WANDB" = "True" ]; then
-    export WANDB_MODE="online"
-else
-    export WANDB_MODE="disabled"
-fi
 
 echo "DEEPSPEED_STRAT: ${DEEPSPEED_STRAT}"
 echo "ENABLE_WANDB: ${ENABLE_WANDB}"
@@ -85,23 +74,22 @@ mkdir -p "${PROJECT_DIR}/checkpoint/"
 ##################################################
 # PARAMS
 
-export S_DO_EXPERIMENT="True"
-export S_STACK_IX="2"
-export S_NOISE="0.3"
+export S_DO_EXPERIMENT="False"
+export S_STACK_IX="1"
 
 
-# echo "##################################################"
-# echo "INITIALIZING"
-# python "${ROOT_DIR}/init_model.py" \
-#     --n_layer 4 --n_embd 256 \
-#     --vocab_size world --skip-if-exists \
-#     "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
+echo "##################################################"
+echo "INITIALIZING"
+python "${ROOT_DIR}/init_model.py" \
+    --n_layer 4 --n_embd 256 \
+    --vocab_size world --skip-if-exists \
+    "${PROJECT_DIR}/checkpoint/${INIT_MODEL_NAME}"
 
 
-# echo "##################################################"
-# echo "PRELOADING DATASET"
-# # python "preload_datapath.py" "run/r02/config.yaml"
-# python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
+echo "##################################################"
+echo "PRELOADING DATASET"
+# python "preload_datapath.py" "run/r02/config.yaml"
+python "${ROOT_DIR}/preload_datapath.py" "${PROJECT_DIR}/config.yaml"
 
 
 echo "##################################################"

@@ -23,7 +23,7 @@ import os
 SRC_DIR = os.path.dirname(os.path.realpath(__file__))
 
 # World tokenizer
-from .dataflow.trie_tokenizer import world_tokenizer_encode
+from .dataflow.trie_tokenizer import world_tokenizer_encode, get_world_tokenizer
 import numpy as np
 
 
@@ -1812,6 +1812,14 @@ class RWKVDataModule(LightningDataModule):
             # Pinned in GPU memory
             pin_memory=self.dataloader_pin_memory
         )
+
+
+        # # DEBUG
+        # tok = get_world_tokenizer(True)
+        # for i, xs in enumerate(_train_dataloader):
+        #     if i > 10:
+        #         break
+        #     print([tok.decode(x.tolist()) for x in xs['input_ids']])
 
         return _train_dataloader
 

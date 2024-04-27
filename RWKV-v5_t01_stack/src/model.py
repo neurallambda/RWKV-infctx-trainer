@@ -337,6 +337,8 @@ class RWKV(L.LightningModule):
                  freeze_embeddings=False,
                  ):
 
+
+
         # Lets save everything in one shot
         # (this is used for wandb logging)
         self.setup_args = locals()
@@ -481,6 +483,9 @@ class RWKV(L.LightningModule):
         self.zero_offset = 1e-6
         self.n_stack = 16
         self.freeze_embeddings = freeze_embeddings
+
+        if freeze_embeddings:
+            print('FREEZING EMBEDDINGS')
 
 
         ##########
