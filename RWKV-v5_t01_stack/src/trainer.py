@@ -3,7 +3,6 @@ from lightning.pytorch.strategies.deepspeed import DeepSpeedStrategy
 import lightning as Lightning
 import torch
 import math
-import wandb
 
 global RWKV_JIT_ON, RWKV_TORCH_COMPILE, RWKV_NO_CUDA
 
@@ -15,16 +14,16 @@ global RWKV_JIT_ON, RWKV_TORCH_COMPILE, RWKV_NO_CUDA
 class RWKVLightningTrainer(Trainer):
     def __init__(
             self,
-            *args, 
+            *args,
             # Replaces the accumulate_grad_batches, if set
             # automatically compute the accumulate_grad_batches
             #
-            # According to the microbatch_size, num_nodes, 
+            # According to the microbatch_size, num_nodes,
             # and num_devices configured
             target_batch_size=-1,
             # Microbatch sizing, to be used with
-            # each training step per GPU. 
-            # 
+            # each training step per GPU.
+            #
             # This is the same as pytorch dataset batch size.
             microbatch_size=1,
             # Handle the rest of args, as per normal
@@ -55,7 +54,7 @@ class RWKVLightningTrainer(Trainer):
             # Extract the num_nodes and devices
             num_nodes = kwargs.get("num_nodes", 1)
             devices = kwargs.get("devices", "auto")
-            
+
             # Compute the number of devices
             if devices == "auto":
                 num_devices = torch.cuda.device_count()
@@ -65,7 +64,7 @@ class RWKVLightningTrainer(Trainer):
                 num_devices = len(devices)
             else:
                 raise ValueError(f"Unsupported devices config '{devices}', unable to compute device count for 'target_batch_size'")
-            
+
             # Compute the accumulate_grad_batches
             accumulate_grad_batches = max( 1, math.floor(target_batch_size / (num_nodes * num_devices * microbatch_size)) )
             kwargs["accumulate_grad_batches"] = accumulate_grad_batches
@@ -85,7 +84,7 @@ class RWKVLightningTrainer(Trainer):
                 f"   - microbatch_size:         {microbatch_size}\n"+
                 f"   - accumulate_grad_batches: {accumulate_grad_batches}\n"
                 f"   - effective_batch_size:    {effective_batch_size}\n")
-            
+
             # Disable CUDA, if the device type is NOT auto / cuda
             # or if no CUDA devices was detected
             if devices != "auto" and devices != "cuda":
@@ -93,15 +92,15 @@ class RWKVLightningTrainer(Trainer):
             if num_devices <= 0:
                 RWKV_NO_CUDA = True
 
-        # Update WANDB config
-        # ---
-        if wandb.run is not None:
-            trainer_config["target_batch_size"] = target_batch_size
-            del trainer_config["logger"]
-            del trainer_config["callbacks"]
-            wandb.config.update({
-                "trainer": trainer_config
-            })
+        # # Update WANDB config
+        # # ---
+        # if wandb.run is not None:
+        #     trainer_config["target_batch_size"] = target_batch_size
+        #     del trainer_config["logger"]
+        #     del trainer_config["callbacks"]
+        #     wandb.config.update({
+        #         "trainer": trainer_config
+        #     })
 
         # Call the parent constructor
         super().__init__(*args, **kwargs)
@@ -111,13 +110,13 @@ class RWKVLightningTrainer(Trainer):
         # if local rank is 0
         if target_batch_size_log_msg != "" and self.local_rank == 0:
             print(target_batch_size_log_msg)
-    
+
     # Fabric instance, useful for coordinating between processes
     # when `self.trainer.strategy.reduce` is not possible
     def getFabric(self):
         if self._fabric_instance is not None:
             return self._fabric_instance
-        
+
         strat = self.strategy
         if strat is None:
             raise ValueError("Trainer strategy config is missing")
@@ -126,7 +125,7 @@ class RWKVLightningTrainer(Trainer):
         stratStr = "auto"
         if isinstance(strat, DeepSpeedStrategy):
             stratStr = "deepspeed"
-        
+
         self._fabric_instance = Lightning.Fabric(
             accelerator=self.accelerator,
             devices=self.num_devices,

@@ -1,6 +1,6 @@
 import sys, os, yaml
 
-# # Lets configure PYTORCH_CUDA_ALLOC_CONF to use `backend:cudaMallocAsync` 
+# # Lets configure PYTORCH_CUDA_ALLOC_CONF to use `backend:cudaMallocAsync`
 # # unless backend is already configured, to optimize memory allocations.
 # #
 # # This has to be done before any torch related modules are imported
@@ -48,7 +48,7 @@ for arg in sys.argv[1:]:
             current_key = arg
     elif current_key:
         CLI_ARGS_MAP[current_key] = arg
-        current_key = None     
+        current_key = None
 
 # Check for the config file
 CONFIG_FILE_PATH = None
@@ -66,7 +66,7 @@ with open(CONFIG_FILE_PATH, 'r') as f:
 assert LIGHTNING_CONFIG is not None, "Failed to load config file: "+CONFIG_FILE_PATH
 
 # We need to detect if deepspeed 3 is being used, either as defined
-# by the config file, or by the command line arguments. 
+# by the config file, or by the command line arguments.
 # Before loading the respective RWKV modules, with the required env vars
 # ---
 def disable_jit_if_deepspeed_3():
@@ -83,7 +83,7 @@ def disable_jit_if_deepspeed_3():
         print(f"[RWKV.lightning_trainer.py] Detected {assumed_deepspeed_strategy}, disabling JIT using RWKV_JIT_ON=0")
         os.environ["RWKV_JIT_ON"] = "0"
         os.environ["RWKV_TORCH_COMPILE"] = "0"
-        
+
 
 # Perform the deepspeed 3 check
 disable_jit_if_deepspeed_3()
@@ -98,7 +98,7 @@ disable_jit_if_deepspeed_3()
 #
 # ---
 #
-# ckpt-mode, "2nd-last" uses the 2nd last checkpoint, instead of the truely latest checkpoint. 
+# ckpt-mode, "2nd-last" uses the 2nd last checkpoint, instead of the truely latest checkpoint.
 # And is meant to be used with the checkpoint ooption `save_last: true`
 #
 # this is used to mitigate potential checkpoint file corruption issues that occur when the training
@@ -164,12 +164,12 @@ def process_auto_resume_ckpt():
 
         # Safety check on the dir
         assert auto_resume_ckpt_dir is not None, "Failed to extract checkpoint dir from config, for --auto-resume-ckpt-dir=True"
-        
+
     # Log the setting flag
     print(f"[RWKV.lightning_trainer.py] Enabling --auto-resume-ckpt-dir={auto_resume_ckpt_dir} --auto-resume-ckpt-mode={auto_resume_ckpt_mode}")
 
     # Check if the --auto-resume-ckpt-dir exists, if it does not initialize it and return
-    # In some rare cases, path can "not exists" but exists when "created" 	
+    # In some rare cases, path can "not exists" but exists when "created"
     if not os.path.exists(auto_resume_ckpt_dir):
         try:
             os.makedirs(auto_resume_ckpt_dir)
@@ -183,7 +183,7 @@ def process_auto_resume_ckpt():
     #      os.makedirs(auto_resume_ckpt_dir)
     #      print(f"[RWKV.lightning_trainer.py] Created '{auto_resume_ckpt_dir}' directory (did not exist previously)")
     #      return
-    
+
     # Get the list of directories in the --auto-resume-ckpt-dir
     auto_resume_ckpt_dir_list = os.listdir(auto_resume_ckpt_dir)
 
@@ -220,7 +220,7 @@ def process_auto_resume_ckpt():
             # Use the second checkpoint as default behaviour, log a warning for invalid mode
             checkpoint_to_use = auto_resume_ckpt_dir_list[1]
             print(f"[RWKV.lightning_trainer.py][warning] Invalid --auto-resume-ckpt-mode={auto_resume_ckpt_mode}, using '2nd-last' instead")
-    
+
     # Log the chekpoint to use
     print(f"[RWKV.lightning_trainer.py] Found {checkpoint_count} checkpoints in '{auto_resume_ckpt_dir}', using '{checkpoint_to_use}'")
 
@@ -243,7 +243,7 @@ def remove_arg(argList, argCommand):
     for arg in argList:
         if arg.startswith(argCommand+"="):
             argList.remove(arg)
-    
+
     # Remove the --argCommand argValue varient
     # we do this by searchig for `argCommand`, and the next arg
     for arg in argList:
@@ -252,7 +252,7 @@ def remove_arg(argList, argCommand):
             if argIndex < len(argList)-1:
                 argList.remove(argList[argIndex+1])
             argList.remove(arg)
-    
+
     # Return the modified argList
     return argList
 
@@ -269,10 +269,9 @@ from src.trainer import RWKVLightningTrainer
 
 def cli_main():
     LightningCLI(
-        RWKV, RWKVDataModule, 
+        RWKV, RWKVDataModule,
         save_config_kwargs={"overwrite": True},
         trainer_class=RWKVLightningTrainer,
-
         # Overwrite several trainer default configs
         trainer_defaults={
             "accelerator": "gpu",
@@ -284,7 +283,7 @@ def cli_main():
             # for larger model sizes randomly on multi-gpus
             "num_sanity_val_steps": 0,
 
-            # Disable default distributed sampler, 
+            # Disable default distributed sampler,
             # so that we can control shuffle logic on our side instead
             "use_distributed_sampler": False
         },

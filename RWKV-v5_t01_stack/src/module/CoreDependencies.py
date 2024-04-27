@@ -1,7 +1,7 @@
 ### ---
 # External shared pytorch dependencies, used across multiple modules
 #
-# Other modules in this codebase should not be imported in this file, 
+# Other modules in this codebase should not be imported in this file,
 # only external dependencies, and shared dependencies should be imported here
 ### ---
 
@@ -24,7 +24,6 @@ from lightning.pytorch.strategies import DeepSpeedStrategy
 import deepspeed
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 import deepspeed.runtime.lr_schedules
-import wandb
 
 from torch.utils.cpp_extension import load
 
@@ -104,11 +103,11 @@ if RWKV_TORCH_COMPILE:
     TCompileMax        = lambda x: torch.compile(x, mode="default", fullgraph=True)
     TCompileBaseline   = lambda x: torch.compile(x, mode='default', fullgraph=False)
 
-    # Running in eager mode?   
+    # Running in eager mode?
     torch._dynamo.config.suppress_errors = True
 
     # ---
-    # Because torch.compile is expected to change overtime, the two options should 
+    # Because torch.compile is expected to change overtime, the two options should
     # be tested every now and then, for any performance changes
     #
     # and we should switch over to the broaded automated approach if its "faster"
@@ -127,7 +126,7 @@ if RWKV_TORCH_COMPILE:
 
     # The following are known warnings in the nightly build, that can be safely ignored for stable release
     #
-    # `torch._inductor.utils: [WARNING] DeviceCopy in input program` 
+    # `torch._inductor.utils: [WARNING] DeviceCopy in input program`
     # https://discuss.pytorch.org/t/what-can-cause-warning-devicecopy-in-input-program/175566
 
     # Added warning

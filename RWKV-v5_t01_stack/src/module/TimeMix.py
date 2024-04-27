@@ -1,3 +1,117 @@
+'''
+
+SKETCH:
+
+# WKV5_CUDA autograd module
+class WKV5_CUDA(torch.autograd.Function):
+    # WKV5 forwarding process
+    # NOTE: This will modify the state value as part of the forward process
+    @staticmethod
+    def forward(ctx,
+            B:int, T:int, C:int, H:int,
+            state:torch.Tensor,
+            r:torch.Tensor, k:torch.Tensor,
+            v:torch.Tensor, w:torch.Tensor,
+            u:torch.Tensor
+        ):
+
+    # WKV5 backward pass process
+    @staticmethod
+    def backward(ctx, gy):
+
+
+@TCompileDisable
+@torch.jit.ignore
+def RUN_WKV5_CUDA(
+    B:int, T:int, C:int, H:int,
+    state:torch.Tensor,
+    r:torch.Tensor, k:torch.Tensor,
+    v:torch.Tensor, w:torch.Tensor,
+    u:torch.Tensor
+):
+    return WKV5_CUDA.apply(B, T, C, H, state, r, k, v, w, u)
+
+### ---
+# TimeMix block class handling
+### ---
+
+# RWKV TimeMix module
+class RWKV_TimeMix(JITModClass):
+    def __init__(self, layer_id, n_layer, n_embd, n_head, head_size, dim_att, chunk_len:int = 128, precision:int = 64):
+
+    def _preload_cuda(self):
+        global wkv5_cuda_kernel, RWKV_NO_CUDA
+            wkv5_cuda_kernel = torch.utils.cpp_extension.load(
+                name="wkv5",
+                sources=[
+                    os.path.join(code_dir, "cuda/wkv5_op.cpp"),
+                    os.path.join(code_dir, "cuda/wkv5_cuda.cu"),
+                ],
+            )
+
+    # forwarding time mix given the model weights and the input tokens and states.
+    #
+    # Given:
+    # - Incoming token embedding size of shape [batch_size, seq_len, embedding_size]
+    # - Last states containing of shape [
+    #       [batch_size, state_size] ## Channel mix state,
+    #       [batch_size, n_head, head_size, head_size] ## WKV state
+    #   ]
+    #
+    # Returns a pair
+    # - of output embedding of shape [batch_size, seq_len, embedding_size]
+    # - and the last output state of shape [
+    #       [batch_size, state_size] ## Channel mix state,
+    #       [batch_size, n_head, head_size, head_size] ## WKV state
+    #   ]
+    def forward(self, x, last_state: tuple[torch.Tensor,torch.Tensor]) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor]]:
+        # Run with cuda
+        if self.use_cuda is True:
+           return self._forward_cuda(x, last_state)
+
+        # Run without cuda (cpu mode, etc)
+        return self._forward_nocuda_optimized(x, last_state)
+
+    @JITModMethod
+    def _forward_cuda(self, x, last_state: tuple[torch.Tensor,torch.Tensor]) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor]]:
+
+    @JITModMethod
+    def _forward_nocuda_optimized(self, x, last_state: tuple[torch.Tensor,torch.Tensor]) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor]]:
+
+
+# NOTE: Not actually used anywhere, the for-loop is obviated in real code
+def compute_wkv_state(
+        k, v, r,
+        time_faaaa: torch.nn.Parameter,
+        time_decay: torch.nn.Parameter,
+        wkv_state,
+        n_head:int, head_size:int,
+        B:int, TT:int
+    ):
+    # Compute attent and the initial output tensor
+    at = k @ v
+    u = time_faaaa.view(1,1,n_head, 1, -1)
+
+    # Slightly inefficent, but it works, lets compute all the tokens
+    w = time_decay.exp().neg().exp().reshape(1, n_head,-1,1)
+
+    out = (u * r) @ at
+    for t in range(TT):
+        out[:,t] += r[:,t] @ wkv_state
+
+        # We make a clone copy, so the previous object backprop state is tracked seperately
+        wkv_state = wkv_state.clone()
+        wkv_state *= w
+        wkv_state += at[:,t]
+
+    return wkv_state, out
+
+
+
+
+
+'''
+
 # Dependencies
 from .CoreDependencies import *
 from .OptimizedOps import modified_lerp

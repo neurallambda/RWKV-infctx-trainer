@@ -196,74 +196,67 @@ class MyStack(nn.Module):
     def __init__(self, n_embd):
         super().__init__()
         INIT_SHARPEN = 8.0
-        H = 16
+        self.OP_H = 16
+        self.LSTM_H = 32
 
         self.n_embd = n_embd
         self.sharp = nn.Parameter(torch.tensor([INIT_SHARPEN]))
 
         Op = lambda: nn.Sequential(
-            nn.Linear(n_embd * 2, H),
+            nn.Linear(self.LSTM_H, self.OP_H),
             nn.ReLU(),
-            nn.Linear(H, 1, bias=False),
+            nn.Linear(self.OP_H, 1, bias=False),
             nn.Sigmoid()
         )
 
         self.push = Op()
         self.pop = Op()
         self.nop = Op()
+        self.lstm = nn.LSTMCell(n_embd, self.LSTM_H)
 
     def forward(self,
                 ss: S.StackState,
-                x : torch.Tensor,
+                xs : torch.Tensor,
                 bs : BlockState):
-        # (Pdb) x.shape
-        # torch.Size([1, 4, 256])
-        # (Pdb) bs.time_mix_state[0].shape
-        # torch.Size([1, 256])
-        # (Pdb) bs.time_mix_state[1].shape
-        # torch.Size([1, 4, 64, 64])
-        # (Pdb) bs.channel_mix_state.shape
-        # torch.Size([1, 256])
+        # bs.time_mix_state[0] = x lerp
+        # bs.time_mix_state[1] = wkv state
+        # bs.channel_mix_state = channel mix lerp
 
-        # print('ss.stack.shape: ', ss.stack.shape)
-        # print('ss.pointer.shape: ', ss.pointer.shape)
-        # print('x.shape: ', x.shape)
-        # print('bs.time_mix_state[0].shape: ', bs.time_mix_state[0].shape)
-        # print('bs.time_mix_state[1].shape: ', bs.time_mix_state[1].shape)
-        # print('bs.channel_mix_state[0].shape: ', bs.channel_mix_state[0].shape)
+        # ss.stack.shape:    torch.Size([B, 16, C])
+        # ss.pointer.shape:  torch.Size([B, 16])
+        # x.shape:           torch.Size([B, T, C])
+        # bs.time_mix_state[0].shape:  torch.Size([B, C])
+        # bs.time_mix_state[1].shape:  torch.Size([B, 4, 64, 64])
+        # bs.channel_mix_state.shape:  torch.Size([B, C])
 
-        batch, n_embd = x.size(0), x.size(2)
 
-        # NOTE: I still don't know what the BlockState values mean exactly, so
-        #       this is just a random decision to use time_mix_state and
-        #       channel_mix_state randomly like this
-        op_h = torch.cat([bs.time_mix_state[0], bs.channel_mix_state], dim=-1)
-        should_push = self.push(op_h).squeeze(1)
-        should_pop = self.pop(op_h).squeeze(1)
-        should_nop = self.nop(op_h).squeeze(1)
+        B, T, D = xs.size(0), xs.size(1), xs.size(2)
 
-        # print()
-        # print(should_push)
-        # print(should_pop)
-        # print(should_nop)
+        # init LSTM
+        lstm_state = (
+            torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype),
+            torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype)
+        )
 
-        # (Pdb) should_nop.shape
-        # torch.Size([1])
-        # (Pdb) self.sharp
-        # Parameter containing:
-        # tensor([8.], device='cuda:0', requires_grad=True)
-        # (Pdb) ss.stack.shape
-        # torch.Size([1, 16, 256])
-        # (Pdb) ss.pointer.shape
-        # torch.Size([1, 16])
+        outs = []
+        for t in range(T):
+            x = xs[:, t]
+            lstm_state = self.lstm(x, lstm_state)
+            hidden, cell = lstm_state
 
-        repeat = x.size(1) # TODO: Why is the first input shaped different than all next inputs?
-        value = x.sum(dim=1)
-        nss, pop_val = S.push_pop_nop(ss, self.sharp, should_push, should_pop, should_nop, value)
-        pop_val = pop_val.unsqueeze(1).expand(batch, repeat, n_embd)
+            op_h = hidden
+            should_push = self.push(op_h).squeeze(1)
+            should_pop = self.pop(op_h).squeeze(1)
+            should_nop = self.nop(op_h).squeeze(1)
 
+            ss, pop_val = S.push_pop_nop(ss, self.sharp, should_push, should_pop, should_nop, x)
+
+            outs.append(pop_val)
+
+        out = torch.stack(outs, dim=1)
         assert pop_val.shape == x.shape, breakpoint()
-        return nss, pop_val, bs
+
+        return ss, out, bs
 
 
 ### ---
