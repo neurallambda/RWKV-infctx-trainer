@@ -81,7 +81,7 @@ trainer:
   # Generally what you want to configure is the maximum number of epochs
   # Leave it as -1, and it will keep going forever till interrupted
   # Or set it as a number, and it will stop after that number of epochs
-  max_epochs: 4
+  max_epochs: 6
   min_epochs: null
 
   # Number of datasamples to train for each step, a data sample is considered
@@ -227,8 +227,8 @@ data:
   # ---
   multi_column_keys: ['text', 'label']
   multi_column_prefix: ["# Is Palindrome?: ", "# Answer: "]
-  multi_column_train_mask: [true, true]
-  multi_column_separator: ""
+  multi_column_train_mask: [false, true]
+  multi_column_separator: " "
 
   # If processing prompt/completion jsonl pairs, the prompt is masked by default
   # use this flag to disable this default behaviour

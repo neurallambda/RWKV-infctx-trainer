@@ -1813,11 +1813,10 @@ class RWKVDataModule(LightningDataModule):
             pin_memory=self.dataloader_pin_memory
         )
 
-
         # # DEBUG
         # tok = get_world_tokenizer(True)
         # for i, xs in enumerate(_train_dataloader):
-        #     if i > 10:
+        #     if i > 2:
         #         break
         #     print([tok.decode(x.tolist()) for x in xs['input_ids']])
 

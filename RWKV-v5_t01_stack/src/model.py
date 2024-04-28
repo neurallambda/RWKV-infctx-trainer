@@ -8,7 +8,10 @@ from .module.CoreDependencies import *
 from .module.ChannelMix import RWKV_ChannelMix
 from .module.TimeMix import RWKV_TimeMix
 
+from torch.nn.functional import elu, selu, gelu, leaky_relu
+
 import neurallambda.stack as S
+import neurallambda.latch as Latch
 
 S_STACK_IX = eval(os.environ['S_STACK_IX'])
 S_DO_EXPERIMENT = eval(os.environ['S_DO_EXPERIMENT'])
@@ -197,27 +200,34 @@ class MyStack(nn.Module):
         super().__init__()
         INIT_SHARPEN = 8.0
         self.OP_H = 16
-        self.LSTM_H = 32
+        self.LSTM_H = 2 # [T, F]
+        self.H = 32
 
         self.n_embd = n_embd
         self.sharp = nn.Parameter(torch.tensor([INIT_SHARPEN]))
+        self.latch = Latch.DataLatch(n_embd, init_scale=1e-2)
+        self.should_pop = nn.Parameter(torch.randn(n_embd))  # learns the mid-way character
+        # self.null_symbol = nn.Parameter(torch.randn(n_embd))
 
-        Op = lambda: nn.Sequential(
-            nn.Linear(self.LSTM_H, self.OP_H),
+        self.proj = nn.Sequential(
+            nn.Linear(n_embd * 2 + 2, self.H, bias=False),
             nn.ReLU(),
-            nn.Linear(self.OP_H, 1, bias=False),
-            nn.Sigmoid()
+            nn.Linear(self.H, n_embd),
+            nn.LayerNorm(n_embd),
         )
 
-        self.push = Op()
-        self.pop = Op()
-        self.nop = Op()
-        self.lstm = nn.LSTMCell(n_embd, self.LSTM_H)
+        self.lstm = nn.LSTMCell(1 + 1, # [cs popped and current, is latch on?]
+                                self.LSTM_H
+                                )  # running AND
+
+        self.true = nn.Parameter(torch.randn(n_embd))
+        self.false = nn.Parameter(torch.randn(n_embd))
 
     def forward(self,
                 ss: S.StackState,
                 xs : torch.Tensor,
-                bs : BlockState):
+                # bs : BlockState
+                ):
         # bs.time_mix_state[0] = x lerp
         # bs.time_mix_state[1] = wkv state
         # bs.channel_mix_state = channel mix lerp
@@ -230,33 +240,68 @@ class MyStack(nn.Module):
         # bs.channel_mix_state.shape:  torch.Size([B, C])
 
 
-        B, T, D = xs.size(0), xs.size(1), xs.size(2)
+        B, T, D, device, dtype = xs.size(0), xs.size(1), xs.size(2), xs.device, xs.dtype
 
         # init LSTM
+
         lstm_state = (
             torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype),
             torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype)
         )
+        # pop_val = torch.zeros_like(xs[:,0])
+
+        latch_state = torch.randn((B, D), device=device, dtype=dtype)
+        nback = [latch_state, ]
 
         outs = []
         for t in range(T):
             x = xs[:, t]
-            lstm_state = self.lstm(x, lstm_state)
+
+            # Decide what to do
+            lsr = nback[0] # queue peek
+            pop = torch.cosine_similarity(self.should_pop.unsqueeze(0), lsr)
+            pop = elu(pop)  # eliminate negative sims
+            # pop = gelu(pop)
+            # pop = leaky_relu(pop)
+            push = 1 - pop
+            nop = torch.zeros_like(pop)
+
+            # stack
+            ss, pop_val = S.push_pop_nop(ss, self.sharp, push, pop, nop, x)
+
+            # latch
+            latch_state = self.latch(latch_state, enable=x, data=x)
+
+            nback.append(latch_state) # enqueue
+            nback = nback[1:] # pop queue
+
+            # string matches if popped_val continues to equal correct val, and the latch state is on
+            cs = torch.cosine_similarity(x, pop_val, dim=1).unsqueeze(1)
+
+            lstm_state = self.lstm(torch.cat([cs, pop.unsqueeze(1)], dim=-1), lstm_state)
             hidden, cell = lstm_state
 
-            op_h = hidden
-            should_push = self.push(op_h).squeeze(1)
-            should_pop = self.pop(op_h).squeeze(1)
-            should_nop = self.nop(op_h).squeeze(1)
+            out = (
+                torch.einsum('d, b -> bd', self.true, hidden[:, 0]) +
+                torch.einsum('d, b -> bd', self.false, hidden[:, 1])
+            )
+            outs.append(out)
 
-            ss, pop_val = S.push_pop_nop(ss, self.sharp, should_push, should_pop, should_nop, x)
+            # cs = torch.cosine_similarity(x, pop_val, dim=1).unsqueeze(1)
+            # lstm_state = self.lstm(torch.cat([x, pop_val, cs], dim=-1), lstm_state)
+            # hidden, cell = lstm_state
+            # op_h = cell
+            # op = self.op(op_h)
+            # # sop = F.gumbel_softmax(op, tau=1.0, hard=False, dim=-1)
+            # sop = F.softmax(op, dim=-1)
+            # should_push, should_pop, should_nop = [x.squeeze(-1) for x in torch.chunk(sop, chunks=3, dim=-1)]
+            # ss, pop_val = S.push_pop_nop(ss, self.sharp, should_push, should_pop, should_nop, x)
 
-            outs.append(pop_val)
 
         out = torch.stack(outs, dim=1)
         assert pop_val.shape == x.shape, breakpoint()
 
-        return ss, out, bs
+        return ss, out
 
 
 ### ---
@@ -791,11 +836,6 @@ class RWKV(L.LightningModule):
         else:
             cur_bs_list = BlockStateList(last_shift_states, last_wkv_states)
 
-        # Init stack
-        new_stack_states = None
-        if last_stack_states is None:
-            last_stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device, dtype=x.dtype)
-
         output_x = x
         for i in range(len(self.blocks)):
             block = self.blocks[i]
@@ -806,18 +846,13 @@ class RWKV(L.LightningModule):
             else:
                 output_x, new_state = block(output_x, last_state)
 
-            ##########
-            # EXPERIMENT: Neuralstack
-            if S_DO_EXPERIMENT:
-                if i == S_STACK_IX:
-                    # output_x = output_x + torch.randn_like(output_x) * eval(os.environ['S_NOISE'])
-                    # print()
-                    # print('PRE: ', output_x.shape)
-                    # new_stack_states = None
-                    new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
-                    # print('POST: ', output_x.shape)
+            # ##########
+            # # EXPERIMENT: Embedded Neuralstack
 
-            ##########
+            # if i in S_STACK_IX and S_DO_EXPERIMENT:
+            #     new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
+
+            # ##########
 
             new_states[i] = new_state
 
@@ -825,7 +860,22 @@ class RWKV(L.LightningModule):
         output_x = self.ln_out(output_x)
         output_x = self.head(output_x)
 
-        return output_x, new_states.shift_states, new_states.wkv_states, new_stack_states
+
+        ##########
+        # EXPERIMENT: Parallel Neuralstack
+
+        # Init stack
+        new_stack_states = None
+        if last_stack_states is None:
+            last_stack_states = S.initialize(self.n_embd, self.n_stack, B, self.zero_offset, idx.device, dtype=x.dtype)
+
+        last_stack_states, stack_outs = self.stack(last_stack_states, x)
+        stack_outs = self.head(self.ln_out(stack_outs))
+
+        # all_out = output_x + stack_outs
+        all_out = stack_outs
+
+        return output_x, new_states.shift_states, new_states.wkv_states, last_stack_states
 
     #
     # Custom overwrite of manual_backwards operation, to skip the "manual_backwards"
