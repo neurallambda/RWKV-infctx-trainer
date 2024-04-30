@@ -81,7 +81,7 @@ trainer:
   # Generally what you want to configure is the maximum number of epochs
   # Leave it as -1, and it will keep going forever till interrupted
   # Or set it as a number, and it will stop after that number of epochs
-  max_epochs: 6
+  max_epochs: 8
   min_epochs: null
 
   # Number of datasamples to train for each step, a data sample is considered

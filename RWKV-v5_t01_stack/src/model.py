@@ -199,29 +199,42 @@ class MyStack(nn.Module):
     def __init__(self, n_embd):
         super().__init__()
         INIT_SHARPEN = 8.0
-        self.OP_H = 16
-        self.LSTM_H = 2 # [T, F]
-        self.H = 32
-
+        self.WEIRD_H = 16
+        self.LSTM_H = 32
+        self.OP_H = 32
         self.n_embd = n_embd
-        self.sharp = nn.Parameter(torch.tensor([INIT_SHARPEN]))
-        self.latch = Latch.DataLatch(n_embd, init_scale=1e-2)
-        self.should_pop = nn.Parameter(torch.randn(n_embd))  # learns the mid-way character
-        # self.null_symbol = nn.Parameter(torch.randn(n_embd))
+
+        EXTRAS = 5
+
+        # MEMORY
+
+        # stack
+        # latches
+        # default embeddings
+
+        # OPERATIONS
+
+        # stack ops
+        # project trace
+
 
         self.proj = nn.Sequential(
-            nn.Linear(n_embd * 2 + 2, self.H, bias=False),
+            # nn.GroupNorm(2, n_embd * 2),
+            nn.Linear(n_embd * 2 + EXTRAS, 16),
             nn.ReLU(),
-            nn.Linear(self.H, n_embd),
-            nn.LayerNorm(n_embd),
+            nn.Linear(16, self.WEIRD_H),
         )
+        self.lstm = nn.LSTMCell(self.WEIRD_H,  # WEIRD_H + cos_sim
+                                self.LSTM_H)
+        self.op = nn.Sequential(
+            nn.Linear(self.LSTM_H, self.OP_H, bias=False),
+            nn.ReLU(),
+            nn.Linear(self.OP_H, 3, bias=False),
+            nn.Softmax(dim=1)
+        )
+        self.sharp = nn.Parameter(torch.tensor([INIT_SHARPEN]))
 
-        self.lstm = nn.LSTMCell(1 + 1, # [cs popped and current, is latch on?]
-                                self.LSTM_H
-                                )  # running AND
-
-        self.true = nn.Parameter(torch.randn(n_embd))
-        self.false = nn.Parameter(torch.randn(n_embd))
+        self.tok = nn.Parameter(torch.randn(n_embd) * 1e-4)
 
     def forward(self,
                 ss: S.StackState,
@@ -239,68 +252,68 @@ class MyStack(nn.Module):
         # bs.time_mix_state[1].shape:  torch.Size([B, 4, 64, 64])
         # bs.channel_mix_state.shape:  torch.Size([B, C])
 
+        '''
+        TODO:
+        * offset the inputs by 1? gotta fix that, anyway
+        * a way of processing the Outer Pdt matrix. SVD? FFT? Transformer (wow, crazy)? CNN? Sliding window of fixed size? Dot product like in QKV attention? product along dim? exponentiate then sum?
+        * deterministic matrix of N-size, eg walsh matrix, or transformer-position-encoding
+
+        output must be a weight of something symbol in memory
+        '''
+
+        # B = xs.size(0)
+        # t = self.tok.unsqueeze(0).unsqueeze(0).expand(B, -1, -1)
+        # xs = torch.cat([t, xs], dim=1) # add start token
 
         B, T, D, device, dtype = xs.size(0), xs.size(1), xs.size(2), xs.device, xs.dtype
 
-        # init LSTM
-
-        lstm_state = (
-            torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype),
-            torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype)
-        )
-        # pop_val = torch.zeros_like(xs[:,0])
-
-        latch_state = torch.randn((B, D), device=device, dtype=dtype)
-        nback = [latch_state, ]
-
         outs = []
-        for t in range(T):
-            x = xs[:, t]
+        pre_stack_trace = None  # [B, :t, D]
+        post_stack_trace = self.tok.unsqueeze(0).repeat(B, -1)
 
-            # Decide what to do
-            lsr = nback[0] # queue peek
-            pop = torch.cosine_similarity(self.should_pop.unsqueeze(0), lsr)
-            pop = elu(pop)  # eliminate negative sims
-            # pop = gelu(pop)
-            # pop = leaky_relu(pop)
-            push = 1 - pop
-            nop = torch.zeros_like(pop)
+        for t in range(T): # offset bc start tok was added
+            x = xs[:, :t+1]  # [B, :t+1, D]
+            s = S.read(ss).unsqueeze(1)  # [B, 1, D]
+            if t == 0:
+                pre_stack_trace = s
+            else:
+                pre_stack_trace = torch.cat([pre_stack_trace, s], dim=1) # [B, :t, D]
 
-            # stack
-            ss, pop_val = S.push_pop_nop(ss, self.sharp, push, pop, nop, x)
+            outer = torch.einsum('btd, bud -> btu', x, pre_stack_trace)
+            stack_outer = torch.einsum('btd, bud -> btu', pre_stack_trace, pre_stack_trace)
+            extras = [
+                outer.sum(dim=1),
+                outer.sum(dim=2),
+                # outer.exp().prod(dim=1),
+                # outer.exp().prod(dim=2),
+                stack_outer.sum(dim=1),
+                stack_outer.sum(dim=2),
+                # stack_outer.exp().prod(dim=1),
+                # stack_outer.exp().prod(dim=2),
+                torch.cosine_similarity(x, pre_stack_trace, dim=2), # [B, :t+1]
+            ]
+            # LSTM
+            lstm_state = (
+                torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype),
+                torch.zeros(B, self.LSTM_H).to(device=xs.device, dtype=xs.dtype)
+            )
+            for u in range(t+1):
+                lx = xs[:, u]
+                ls = pre_stack_trace[:, u]
+                extra_slice = [ex[:,u].unsqueeze(1) for ex in extras]
+                inp = self.proj(torch.cat([lx, ls] + extra_slice, dim=1))  # [B, WEIRD]
+                lstm_state = self.lstm(inp, lstm_state)
 
-            # latch
-            latch_state = self.latch(latch_state, enable=x, data=x)
-
-            nback.append(latch_state) # enqueue
-            nback = nback[1:] # pop queue
-
-            # string matches if popped_val continues to equal correct val, and the latch state is on
-            cs = torch.cosine_similarity(x, pop_val, dim=1).unsqueeze(1)
-
-            lstm_state = self.lstm(torch.cat([cs, pop.unsqueeze(1)], dim=-1), lstm_state)
             hidden, cell = lstm_state
 
-            out = (
-                torch.einsum('d, b -> bd', self.true, hidden[:, 0]) +
-                torch.einsum('d, b -> bd', self.false, hidden[:, 1])
-            )
+            ops = self.op(hidden)
+
+            push, pop, nop = [x.squeeze(-1) for x in torch.chunk(ops, chunks=3, dim=-1)]
+            ss, pop_val = S.push_pop_nop(ss, self.sharp, push, pop, nop, xs[:, t])
+            out = pop_val
             outs.append(out)
 
-            # cs = torch.cosine_similarity(x, pop_val, dim=1).unsqueeze(1)
-            # lstm_state = self.lstm(torch.cat([x, pop_val, cs], dim=-1), lstm_state)
-            # hidden, cell = lstm_state
-            # op_h = cell
-            # op = self.op(op_h)
-            # # sop = F.gumbel_softmax(op, tau=1.0, hard=False, dim=-1)
-            # sop = F.softmax(op, dim=-1)
-            # should_push, should_pop, should_nop = [x.squeeze(-1) for x in torch.chunk(sop, chunks=3, dim=-1)]
-            # ss, pop_val = S.push_pop_nop(ss, self.sharp, should_push, should_pop, should_nop, x)
-
-
         out = torch.stack(outs, dim=1)
-        assert pop_val.shape == x.shape, breakpoint()
-
         return ss, out
 
 
@@ -818,47 +831,50 @@ class RWKV(L.LightningModule):
 
         x = self.emb(idx)
 
-        # Handle dropout (input)
-        if self.dropout > 0.0:
-            x = self.drop0(x)
+        ##########
+        # RWKV
 
-        new_states = BlockStateList.empty(self.n_layer, B, self.n_embd,
-                                          self.n_head, self.head_size,
-                                          x.device, x.dtype)
+        # # Handle dropout (input)
+        # if self.dropout > 0.0:
+        #     x = self.drop0(x)
 
-        # last_shift_states can be None, when we are performing direct inference
-        if last_shift_states is None:
-            cur_bs_list = BlockStateList.create(
-                self.n_layer, B, self.n_embd,
-                self.n_head, self.head_size,
-                x.device, x.dtype
-            )
-        else:
-            cur_bs_list = BlockStateList(last_shift_states, last_wkv_states)
+        # new_states = BlockStateList.empty(self.n_layer, B, self.n_embd,
+        #                                   self.n_head, self.head_size,
+        #                                   x.device, x.dtype)
 
-        output_x = x
-        for i in range(len(self.blocks)):
-            block = self.blocks[i]
-            last_state = cur_bs_list[i]
-            if self.grad_cp:
-                output_x, new_state = deepspeed_checkpoint(
-                    block, output_x, last_state)
-            else:
-                output_x, new_state = block(output_x, last_state)
+        # # last_shift_states can be None, when we are performing direct inference
+        # if last_shift_states is None:
+        #     cur_bs_list = BlockStateList.create(
+        #         self.n_layer, B, self.n_embd,
+        #         self.n_head, self.head_size,
+        #         x.device, x.dtype
+        #     )
+        # else:
+        #     cur_bs_list = BlockStateList(last_shift_states, last_wkv_states)
 
-            # ##########
-            # # EXPERIMENT: Embedded Neuralstack
+        # output_x = x
+        # for i in range(len(self.blocks)):
+        #     block = self.blocks[i]
+        #     last_state = cur_bs_list[i]
+        #     if self.grad_cp:
+        #         output_x, new_state = deepspeed_checkpoint(
+        #             block, output_x, last_state)
+        #     else:
+        #         output_x, new_state = block(output_x, last_state)
 
-            # if i in S_STACK_IX and S_DO_EXPERIMENT:
-            #     new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
+        #     # ##########
+        #     # # EXPERIMENT: Embedded Neuralstack
 
-            # ##########
+        #     # if i in S_STACK_IX and S_DO_EXPERIMENT:
+        #     #     new_stack_states, output_x, new_state = self.stack(last_stack_states, output_x, new_state)
 
-            new_states[i] = new_state
+        #     # ##########
 
-        # Final layernorm and head output
-        output_x = self.ln_out(output_x)
-        output_x = self.head(output_x)
+        #     new_states[i] = new_state
+
+        # # Final layernorm and head output
+        # output_x = self.ln_out(output_x)
+        # output_x = self.head(output_x)
 
 
         ##########
@@ -872,10 +888,14 @@ class RWKV(L.LightningModule):
         last_stack_states, stack_outs = self.stack(last_stack_states, x)
         stack_outs = self.head(self.ln_out(stack_outs))
 
+
+        ##########
+        # Prepare Outputs
+
         # all_out = output_x + stack_outs
         all_out = stack_outs
 
-        return output_x, new_states.shift_states, new_states.wkv_states, last_stack_states
+        return all_out, new_states.shift_states, new_states.wkv_states, last_stack_states
 
     #
     # Custom overwrite of manual_backwards operation, to skip the "manual_backwards"
